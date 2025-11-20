@@ -1,0 +1,91 @@
+# Default configuration for MS spectrum predictor
+
+experiment_name: ms_predictor_default
+seed: 42
+
+model:
+  vocab_size: 22  # 20 amino acids + PAD + UNK
+  hidden_dim: 512
+  num_encoder_layers: 6
+  num_decoder_layers: 6
+  num_heads: 8
+  dim_feedforward: 2048
+  num_predictions: 100
+  max_length: 50
+  max_charge: 10
+  dropout: 0.1
+  activation: gelu
+
+data:
+  train_data_path: null  # Set to your training data path
+  val_data_path: null    # Set to your validation data path
+  test_data_path: null   # Set to your test data path
+  batch_size: 32
+  num_workers: 4
+  max_mz: 2000.0
+  top_k: 200
+  use_dummy_data: true   # Set to false when real data is available
+  dummy_train_samples: 1000
+  dummy_val_samples: 200
+
+loss:
+  # Hungarian matching costs
+  cost_mz: 1.0
+  cost_intensity: 1.0
+  cost_confidence: 1.0
+  
+  # Loss weights
+  loss_mz_weight: 1.0
+  loss_intensity_weight: 1.0
+  loss_confidence_weight: 1.0
+  background_confidence_weight: 0.1
+  
+  # Cosine similarity loss (tunable scaler)
+  use_cosine_loss: true
+  cosine_loss_weight: 0.5
+  cosine_bin_size: 1.0
+
+optimizer:
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1.0e-08
+  
+  # Learning rate scheduler
+  scheduler: cosine
+  warmup_epochs: 5
+  min_lr: 1.0e-06
+  
+  # For StepLR
+  step_size: 10
+  gamma: 0.1
+  
+  # For ReduceLROnPlateau
+  patience: 5
+  factor: 0.5
+
+training:
+  num_epochs: 100
+  gradient_clip: 1.0
+  log_interval: 10
+  val_interval: 1
+  save_interval: 5
+  
+  # Early stopping
+  early_stopping: true
+  early_stopping_patience: 10
+  
+  # Checkpointing
+  checkpoint_dir: checkpoints
+  save_best_only: false
+  
+  # Device
+  device: cuda
+  mixed_precision: true
+
+inference:
+  confidence_threshold: 0.5
+  max_mz: 2000.0
+  batch_size: 64
+
