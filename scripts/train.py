@@ -7,6 +7,7 @@ import argparse
 import torch
 import numpy as np
 import random
+import os
 from torch.utils.data import DataLoader
 
 import sys
@@ -14,6 +15,7 @@ sys.path.insert(0, '/root/ms/src')
 
 from ms_predictor.model.ms_predictor import MSPredictor, count_parameters
 from ms_predictor.data.dataset import MSDataset, DummyMSDataset, collate_fn
+from ms_predictor.data.hdf5_dataset import HDF5MSDataset, create_hdf5_dataloaders
 from ms_predictor.data.tokenizer import AminoAcidTokenizer
 from ms_predictor.data.preprocessing import SpectrumPreprocessor
 from ms_predictor.training.config import Config
@@ -59,6 +61,41 @@ def create_dataloaders(config: Config):
             max_length=config.model.max_length,
             num_predictions=config.model.num_predictions
         )
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config.data.batch_size,
+            shuffle=True,
+            num_workers=config.data.num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config.data.batch_size,
+            shuffle=False,
+            num_workers=config.data.num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True
+        )
+    
+    elif config.data.get('use_hdf5', False) or (config.data.train_data_path and os.path.isdir(config.data.train_data_path)):
+        # Use HDF5 dataset
+        print("Using HDF5 data from OBS")
+        print(f"Data directory: {config.data.train_data_path}")
+        
+        train_loader, val_loader, _ = create_hdf5_dataloaders(
+            data_dir=config.data.train_data_path,
+            metadata_file=config.data.get('metadata_file', None),
+            batch_size=config.data.batch_size,
+            num_workers=config.data.num_workers,
+            tokenizer=tokenizer,
+            preprocessor=preprocessor,
+            max_length=config.model.max_length,
+            cache_in_memory=config.data.get('cache_in_memory', False)
+        )
+    
     else:
         train_dataset = MSDataset(
             data_path=config.data.train_data_path,
@@ -74,24 +111,24 @@ def create_dataloaders(config: Config):
             max_length=config.model.max_length,
             split='val'
         )
-    
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.data.batch_size,
-        shuffle=True,
-        num_workers=config.data.num_workers,
-        collate_fn=collate_fn,
-        pin_memory=True
-    )
-    
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.data.batch_size,
-        shuffle=False,
-        num_workers=config.data.num_workers,
-        collate_fn=collate_fn,
-        pin_memory=True
-    )
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config.data.batch_size,
+            shuffle=True,
+            num_workers=config.data.num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=config.data.batch_size,
+            shuffle=False,
+            num_workers=config.data.num_workers,
+            collate_fn=collate_fn,
+            pin_memory=True
+        )
     
     return train_loader, val_loader
 
