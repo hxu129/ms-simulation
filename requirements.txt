@@ -1,0 +1,30 @@
+# MS Spectrum Predictor - Core Requirements
+# Python >= 3.9
+
+# Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Parquet Support (Primary data format)
+pyarrow>=12.0.0
+
+# HDF5 Support (Optional/Legacy)
+h5py>=3.8.0
+
+# Configuration & Utilities
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Visualization (Optional but recommended)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Jupyter Support (Optional)
+jupyter>=1.0.0
+ipywidgets>=8.0.0
+
