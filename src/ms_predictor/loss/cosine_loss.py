@@ -204,7 +204,7 @@ class SpectralAngleLoss(nn.Module):
         # Compute angle in radians
         angle = torch.acos(cosine_sim)
         
-        # Normalize by π and apply weight
+        # Normalize by pi and apply weight
         loss = (angle / torch.pi).mean()
         
         return self.weight * loss
