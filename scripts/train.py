@@ -16,6 +16,7 @@ sys.path.insert(0, '/root/ms/src')
 from ms_predictor.model.ms_predictor import MSPredictor, count_parameters
 from ms_predictor.data.dataset import MSDataset, DummyMSDataset, collate_fn
 from ms_predictor.data.hdf5_dataset import HDF5MSDataset, create_hdf5_dataloaders
+from ms_predictor.data.parquet_dataset import ParquetMSDataset, create_parquet_dataloaders
 from ms_predictor.data.tokenizer import AminoAcidTokenizer
 from ms_predictor.data.preprocessing import SpectrumPreprocessor
 from ms_predictor.training.config import Config
@@ -80,7 +81,24 @@ def create_dataloaders(config: Config):
             pin_memory=True
         )
     
-    elif config.data.get('use_hdf5', False) or (config.data.train_data_path and os.path.isdir(config.data.train_data_path)):
+    elif config.data.get('use_parquet', False):
+        # Use Parquet dataset (default for OBS data)
+        print("Using Parquet data from OBS")
+        print(f"Data directory: {config.data.train_data_path}")
+        
+        train_loader, val_loader, _ = create_parquet_dataloaders(
+            data_dir=config.data.train_data_path,
+            metadata_file=config.data.get('metadata_file', None),
+            batch_size=config.data.batch_size,
+            num_workers=config.data.num_workers,
+            tokenizer=tokenizer,
+            preprocessor=preprocessor,
+            max_length=config.model.max_length,
+            cache_dataframes=config.data.get('cache_dataframes', False),
+            max_files=config.data.get('max_files', None)
+        )
+    
+    elif config.data.get('use_hdf5', False) or (config.data.train_data_path and os.path.isdir(config.data.train_data_path) and any(f.endswith('.hdf5') for f in os.listdir(config.data.train_data_path))):
         # Use HDF5 dataset
         print("Using HDF5 data from OBS")
         print(f"Data directory: {config.data.train_data_path}")
