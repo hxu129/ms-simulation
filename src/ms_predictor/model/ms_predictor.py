@@ -7,8 +7,8 @@ import torch.nn as nn
 from typing import Dict, Tuple, Optional
 
 from .embeddings import InputEmbedding, LearnableQueryEmbedding
-from .encoder import TransformerEncoder
-from .decoder import TransformerDecoder
+from .encoder import Encoder
+from .decoder import Decoder
 from .heads import PredictionHeads
 
 
@@ -72,7 +72,7 @@ class MSPredictor(nn.Module):
         )
         
         # Transformer encoder
-        self.encoder = TransformerEncoder(
+        self.encoder = Encoder(
             hidden_dim=hidden_dim,
             num_layers=num_encoder_layers,
             num_heads=num_heads,
@@ -88,7 +88,7 @@ class MSPredictor(nn.Module):
         )
         
         # Transformer decoder (bidirectional)
-        self.decoder = TransformerDecoder(
+        self.decoder = Decoder(
             hidden_dim=hidden_dim,
             num_layers=num_decoder_layers,
             num_heads=num_heads,
