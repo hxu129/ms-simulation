@@ -1,14 +1,32 @@
 #!/usr/bin/env python
 """
-Training script for MS spectrum predictor.
+Training script for MS spectrum predictor using Hydra configuration.
+
+Usage examples:
+  # Train with default config
+  python train.py
+  
+  # Override specific parameters
+  python train.py data.batch_size=64 model.hidden_dim=1024
+  
+  # Use config group variants
+  python train.py experiment=small
+  python train.py data=parquet
+  
+  # Combine multiple configs
+  python train.py experiment=large data=parquet data.batch_size=32
+  
+  # Resume from checkpoint
+  python train.py +resume_path=checkpoints/best_model.pt
 """
 
-import argparse
 import torch
 import numpy as np
 import random
 import os
 from torch.utils.data import DataLoader
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 import sys
 sys.path.insert(0, '/root/ms/src')
@@ -33,117 +51,117 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
-def create_dataloaders(config: Config):
+def create_dataloaders(cfg: DictConfig):
     """
     Create training and validation dataloaders.
     
     Args:
-        config: Configuration object
+        cfg: Hydra DictConfig object
         
     Returns:
         Tuple of (train_loader, val_loader)
     """
     tokenizer = AminoAcidTokenizer()
     preprocessor = SpectrumPreprocessor(
-        max_mz=config.data.max_mz,
-        top_k=config.data.top_k,
-        num_predictions=config.model.num_predictions
+        max_mz=cfg.data.max_mz,
+        top_k=cfg.data.top_k,
+        num_predictions=cfg.model.num_predictions
     )
     
-    if config.data.use_dummy_data:
+    if cfg.data.use_dummy_data:
         print("Using dummy data for training (real data not available)")
         train_dataset = DummyMSDataset(
-            num_samples=config.data.dummy_train_samples,
-            max_length=config.model.max_length,
-            num_predictions=config.model.num_predictions
+            num_samples=cfg.data.dummy_train_samples,
+            max_length=cfg.model.max_length,
+            num_predictions=cfg.model.num_predictions
         )
         val_dataset = DummyMSDataset(
-            num_samples=config.data.dummy_val_samples,
-            max_length=config.model.max_length,
-            num_predictions=config.model.num_predictions
+            num_samples=cfg.data.dummy_val_samples,
+            max_length=cfg.model.max_length,
+            num_predictions=cfg.model.num_predictions
         )
         
         train_loader = DataLoader(
             train_dataset,
-            batch_size=config.data.batch_size,
+            batch_size=cfg.data.batch_size,
             shuffle=True,
-            num_workers=config.data.num_workers,
+            num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
             pin_memory=True
         )
         
         val_loader = DataLoader(
             val_dataset,
-            batch_size=config.data.batch_size,
+            batch_size=cfg.data.batch_size,
             shuffle=False,
-            num_workers=config.data.num_workers,
+            num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
             pin_memory=True
         )
     
-    elif config.data.get('use_parquet', False):
+    elif cfg.data.get('use_parquet', False):
         # Use Parquet dataset (default for OBS data)
         print("Using Parquet data from OBS")
-        print(f"Data directory: {config.data.train_data_path}")
+        print(f"Data directory: {cfg.data.train_data_path}")
         
         train_loader, val_loader, _ = create_parquet_dataloaders(
-            data_dir=config.data.train_data_path,
-            metadata_file=config.data.get('metadata_file', None),
-            batch_size=config.data.batch_size,
-            num_workers=config.data.num_workers,
+            data_dir=cfg.data.train_data_path,
+            metadata_file=cfg.data.get('metadata_file', None),
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
             tokenizer=tokenizer,
             preprocessor=preprocessor,
-            max_length=config.model.max_length,
-            cache_dataframes=config.data.get('cache_dataframes', False),
-            max_files=config.data.get('max_files', None)
+            max_length=cfg.model.max_length,
+            cache_dataframes=cfg.data.get('cache_dataframes', False),
+            max_files=cfg.data.get('max_files', None)
         )
     
-    elif config.data.get('use_hdf5', False) or (config.data.train_data_path and os.path.isdir(config.data.train_data_path) and any(f.endswith('.hdf5') for f in os.listdir(config.data.train_data_path))):
+    elif cfg.data.get('use_hdf5', False) or (cfg.data.train_data_path and os.path.isdir(cfg.data.train_data_path) and any(f.endswith('.hdf5') for f in os.listdir(cfg.data.train_data_path))):
         # Use HDF5 dataset
         print("Using HDF5 data from OBS")
-        print(f"Data directory: {config.data.train_data_path}")
+        print(f"Data directory: {cfg.data.train_data_path}")
         
         train_loader, val_loader, _ = create_hdf5_dataloaders(
-            data_dir=config.data.train_data_path,
-            metadata_file=config.data.get('metadata_file', None),
-            batch_size=config.data.batch_size,
-            num_workers=config.data.num_workers,
+            data_dir=cfg.data.train_data_path,
+            metadata_file=cfg.data.get('metadata_file', None),
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
             tokenizer=tokenizer,
             preprocessor=preprocessor,
-            max_length=config.model.max_length,
-            cache_in_memory=config.data.get('cache_in_memory', False)
+            max_length=cfg.model.max_length,
+            cache_in_memory=cfg.data.get('cache_in_memory', False)
         )
     
     else:
         train_dataset = MSDataset(
-            data_path=config.data.train_data_path,
+            data_path=cfg.data.train_data_path,
             tokenizer=tokenizer,
             preprocessor=preprocessor,
-            max_length=config.model.max_length,
+            max_length=cfg.model.max_length,
             split='train'
         )
         val_dataset = MSDataset(
-            data_path=config.data.val_data_path,
+            data_path=cfg.data.val_data_path,
             tokenizer=tokenizer,
             preprocessor=preprocessor,
-            max_length=config.model.max_length,
+            max_length=cfg.model.max_length,
             split='val'
         )
         
         train_loader = DataLoader(
             train_dataset,
-            batch_size=config.data.batch_size,
+            batch_size=cfg.data.batch_size,
             shuffle=True,
-            num_workers=config.data.num_workers,
+            num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
             pin_memory=True
         )
         
         val_loader = DataLoader(
             val_dataset,
-            batch_size=config.data.batch_size,
+            batch_size=cfg.data.batch_size,
             shuffle=False,
-            num_workers=config.data.num_workers,
+            num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
             pin_memory=True
         )
@@ -151,52 +169,56 @@ def create_dataloaders(config: Config):
     return train_loader, val_loader
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Train MS spectrum predictor')
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='configs/default_config.yaml',
-        help='Path to configuration file'
-    )
-    parser.add_argument(
-        '--resume',
-        type=str,
-        default=None,
-        help='Path to checkpoint to resume from'
-    )
+@hydra.main(version_base=None, config_path="../configs", config_name="config")
+def main(cfg: DictConfig):
+    """
+    Main training function with Hydra configuration.
     
-    args = parser.parse_args()
+    Args:
+        cfg: Hydra configuration object (DictConfig)
+    """
+    # Print configuration
+    print("=" * 80)
+    print("Training Configuration:")
+    print("=" * 80)
+    print(OmegaConf.to_yaml(cfg))
+    print("=" * 80)
     
-    # Load configuration
-    config = Config.from_yaml(args.config)
-    print(f"Loaded configuration from {args.config}")
-    print(f"Experiment name: {config.experiment_name}")
+    # Get the original working directory (Hydra changes cwd to outputs/)
+    original_cwd = hydra.utils.get_original_cwd()
+    
+    # Convert config to typed dataclass for better IDE support (optional)
+    # config = Config.from_dictconfig(cfg)
+    # For this implementation, we'll work directly with DictConfig
+    
+    print(f"Experiment name: {cfg.experiment_name}")
+    print(f"Working directory: {os.getcwd()}")
+    print(f"Original directory: {original_cwd}")
     
     # Set seed
-    set_seed(config.seed)
-    print(f"Random seed set to {config.seed}")
+    set_seed(cfg.seed)
+    print(f"Random seed set to {cfg.seed}")
     
     # Create dataloaders
     print("\nCreating dataloaders...")
-    train_loader, val_loader = create_dataloaders(config)
+    train_loader, val_loader = create_dataloaders(cfg)
     print(f"Training samples: {len(train_loader.dataset)}")
     print(f"Validation samples: {len(val_loader.dataset)}")
     
     # Create model
     print("\nCreating model...")
     model = MSPredictor(
-        vocab_size=config.model.vocab_size,
-        hidden_dim=config.model.hidden_dim,
-        num_encoder_layers=config.model.num_encoder_layers,
-        num_decoder_layers=config.model.num_decoder_layers,
-        num_heads=config.model.num_heads,
-        dim_feedforward=config.model.dim_feedforward,
-        num_predictions=config.model.num_predictions,
-        max_length=config.model.max_length,
-        max_charge=config.model.max_charge,
-        dropout=config.model.dropout,
-        activation=config.model.activation
+        vocab_size=cfg.model.vocab_size,
+        hidden_dim=cfg.model.hidden_dim,
+        num_encoder_layers=cfg.model.num_encoder_layers,
+        num_decoder_layers=cfg.model.num_decoder_layers,
+        num_heads=cfg.model.num_heads,
+        dim_feedforward=cfg.model.dim_feedforward,
+        num_predictions=cfg.model.num_predictions,
+        max_length=cfg.model.max_length,
+        max_charge=cfg.model.max_charge,
+        dropout=cfg.model.dropout,
+        activation=cfg.model.activation
     )
     
     num_params = count_parameters(model)
@@ -204,6 +226,8 @@ def main():
     
     # Create trainer
     print("\nCreating trainer...")
+    # Convert DictConfig to Config dataclass for Trainer
+    config = Config.from_dictconfig(cfg)
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
@@ -212,15 +236,20 @@ def main():
     )
     
     # Resume from checkpoint if specified
-    if args.resume:
-        print(f"\nResuming from checkpoint: {args.resume}")
-        trainer.load_checkpoint(args.resume)
+    resume_path = cfg.get('resume_path', None)
+    if resume_path:
+        # Handle relative paths from original working directory
+        if not os.path.isabs(resume_path):
+            resume_path = os.path.join(original_cwd, resume_path)
+        print(f"\nResuming from checkpoint: {resume_path}")
+        trainer.load_checkpoint(resume_path)
     
     # Train
     print("\nStarting training...\n")
     trainer.train()
     
     print("\nTraining complete!")
+    print(f"Outputs saved to: {os.getcwd()}")
 
 
 if __name__ == '__main__':

@@ -1,0 +1,26 @@
+# @package _global_
+# Large model configuration for maximum performance
+
+experiment_name: ms_predictor_large
+
+model:
+  hidden_dim: 768
+  num_encoder_layers: 8
+  num_decoder_layers: 8
+  num_heads: 12
+  dim_feedforward: 3072
+  num_predictions: 150
+
+data:
+  batch_size: 16
+
+training:
+  num_epochs: 200
+  save_interval: 5
+  gradient_clip: 0.5
+
+optimizer:
+  learning_rate: 5.0e-05
+  warmup_epochs: 10
+
+

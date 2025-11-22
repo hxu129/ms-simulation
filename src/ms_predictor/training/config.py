@@ -1,10 +1,15 @@
 """
 Configuration dataclass for MS predictor.
+
+This module provides dataclass definitions for configuration management.
+When using Hydra, configs are loaded as OmegaConf DictConfig objects,
+but these dataclasses serve as documentation and type hints.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Union
 import yaml
+from omegaconf import DictConfig, OmegaConf
 
 
 @dataclass
@@ -135,7 +140,10 @@ class Config:
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
         """
-        Load configuration from YAML file.
+        Load configuration from YAML file (legacy support).
+        
+        Note: When using Hydra, this method is not needed as Hydra
+        handles config loading. This is kept for backward compatibility.
         
         Args:
             yaml_path: Path to YAML configuration file
@@ -145,6 +153,34 @@ class Config:
         """
         with open(yaml_path, 'r') as f:
             config_dict = yaml.safe_load(f)
+        
+        return cls(
+            model=ModelConfig(**config_dict.get('model', {})),
+            data=DataConfig(**config_dict.get('data', {})),
+            loss=LossConfig(**config_dict.get('loss', {})),
+            optimizer=OptimizerConfig(**config_dict.get('optimizer', {})),
+            training=TrainingConfig(**config_dict.get('training', {})),
+            inference=InferenceConfig(**config_dict.get('inference', {})),
+            experiment_name=config_dict.get('experiment_name', 'ms_predictor'),
+            seed=config_dict.get('seed', 42)
+        )
+    
+    @classmethod
+    def from_dictconfig(cls, cfg: DictConfig) -> 'Config':
+        """
+        Convert Hydra DictConfig to Config dataclass.
+        
+        This is useful when you need typed access to config values
+        or when passing config to code that expects the Config dataclass.
+        
+        Args:
+            cfg: Hydra DictConfig object
+            
+        Returns:
+            Config object
+        """
+        # Convert OmegaConf to plain dict then to dataclass
+        config_dict = OmegaConf.to_container(cfg, resolve=True)
         
         return cls(
             model=ModelConfig(**config_dict.get('model', {})),

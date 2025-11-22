@@ -1,0 +1,31 @@
+# Inference configuration for MS spectrum predictor
+
+# Model checkpoint path (required)
+model_path: ???  # Must be provided via command line or override
+
+# Input parameters (can be provided via command line)
+sequence: ???  # Peptide amino acid sequence
+precursor_mz: ???  # Precursor m/z value
+charge: ???  # Charge state
+
+# Inference settings
+inference:
+  confidence_threshold: 0.5
+  max_intensity: 1000.0
+  max_mz: 2000.0
+  batch_size: 64
+
+# Output settings
+output:
+  file: null  # Output file path (MGF format). If null, prints to console
+  format: mgf  # Output format
+
+# Device settings
+device: cuda  # cuda or cpu
+
+# Hydra-specific settings
+hydra:
+  run:
+    dir: outputs/inference/${now:%Y-%m-%d_%H-%M-%S}
+
+

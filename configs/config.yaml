@@ -1,0 +1,15 @@
+# Hydra default configuration for MS spectrum predictor
+# This is the main entry point for Hydra configuration
+
+defaults:
+  - default_config  # Load all settings from default_config.yaml
+  - _self_  # Override with command-line args
+
+# Hydra-specific settings
+hydra:
+  run:
+    dir: outputs/${experiment_name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: multirun/${experiment_name}/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.num}
+

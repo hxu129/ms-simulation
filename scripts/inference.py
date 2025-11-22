@@ -1,11 +1,34 @@
 #!/usr/bin/env python
 """
-Inference script for MS spectrum predictor.
+Inference script for MS spectrum predictor using Hydra configuration.
+
+Usage examples:
+  # Predict with all required parameters via command line
+  python inference.py model_path=checkpoints/best_model.pt \
+                      sequence=PEPTIDE \
+                      precursor_mz=500.5 \
+                      charge=2
+  
+  # With optional parameters
+  python inference.py model_path=checkpoints/best_model.pt \
+                      sequence=PEPTIDE \
+                      precursor_mz=500.5 \
+                      charge=2 \
+                      inference.confidence_threshold=0.7 \
+                      output.file=prediction.mgf
+  
+  # Using a config file
+  python inference.py --config-name inference \
+                      model_path=checkpoints/best_model.pt \
+                      sequence=PEPTIDE \
+                      precursor_mz=500.5 \
+                      charge=2
 """
 
-import argparse
 import torch
 import numpy as np
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 import sys
 sys.path.insert(0, '/root/ms/src')
@@ -14,66 +37,47 @@ from ms_predictor.inference.predictor import SpectrumPredictor, load_model_for_i
 from ms_predictor.data.tokenizer import AminoAcidTokenizer
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Predict MS spectrum from peptide sequence')
-    parser.add_argument(
-        '--model_path',
-        type=str,
-        required=True,
-        help='Path to trained model checkpoint'
-    )
-    parser.add_argument(
-        '--sequence',
-        type=str,
-        required=True,
-        help='Peptide amino acid sequence'
-    )
-    parser.add_argument(
-        '--precursor_mz',
-        type=float,
-        required=True,
-        help='Precursor m/z value'
-    )
-    parser.add_argument(
-        '--charge',
-        type=int,
-        required=True,
-        help='Charge state'
-    )
-    parser.add_argument(
-        '--confidence_threshold',
-        type=float,
-        default=0.5,
-        help='Confidence threshold for filtering predictions'
-    )
-    parser.add_argument(
-        '--max_intensity',
-        type=float,
-        default=1000.0,
-        help='Maximum intensity for denormalization'
-    )
-    parser.add_argument(
-        '--output',
-        type=str,
-        default=None,
-        help='Output file path (MGF format). If not specified, prints to console'
-    )
-    parser.add_argument(
-        '--device',
-        type=str,
-        default='cuda',
-        help='Device to use (cuda or cpu)'
-    )
+@hydra.main(version_base=None, config_path="../configs", config_name="inference")
+def main(cfg: DictConfig):
+    """
+    Inference function with Hydra configuration.
     
-    args = parser.parse_args()
+    Args:
+        cfg: Hydra configuration object (DictConfig)
+    """
+    # Print configuration
+    print("=" * 80)
+    print("Inference Configuration:")
+    print("=" * 80)
+    print(OmegaConf.to_yaml(cfg))
+    print("=" * 80)
+    
+    # Get the original working directory (Hydra changes cwd to outputs/)
+    original_cwd = hydra.utils.get_original_cwd()
+    
+    # Validate required parameters
+    if cfg.model_path == "???":
+        raise ValueError("model_path is required. Provide it via command line: model_path=path/to/checkpoint.pt")
+    if cfg.sequence == "???":
+        raise ValueError("sequence is required. Provide it via command line: sequence=PEPTIDE")
+    if cfg.precursor_mz == "???":
+        raise ValueError("precursor_mz is required. Provide it via command line: precursor_mz=500.5")
+    if cfg.charge == "???":
+        raise ValueError("charge is required. Provide it via command line: charge=2")
+    
+    # Handle relative paths from original working directory
+    import os
+    model_path = cfg.model_path
+    if not os.path.isabs(model_path):
+        model_path = os.path.join(original_cwd, model_path)
     
     # Set device
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = torch.device(cfg.device if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
     # Load model
-    print(f"Loading model from {args.model_path}...")
-    model, config = load_model_for_inference(args.model_path, device)
+    print(f"Loading model from {model_path}...")
+    model, config = load_model_for_inference(model_path, device)
     print("Model loaded successfully")
     
     # Create predictor
@@ -81,21 +85,21 @@ def main():
     predictor = SpectrumPredictor(
         model=model,
         tokenizer=tokenizer,
-        confidence_threshold=args.confidence_threshold,
-        max_mz=config.data.max_mz,
+        confidence_threshold=cfg.inference.confidence_threshold,
+        max_mz=cfg.inference.max_mz,
         device=device
     )
     
     # Make prediction
-    print(f"\nPredicting spectrum for sequence: {args.sequence}")
-    print(f"Precursor m/z: {args.precursor_mz}")
-    print(f"Charge: {args.charge}")
+    print(f"\nPredicting spectrum for sequence: {cfg.sequence}")
+    print(f"Precursor m/z: {cfg.precursor_mz}")
+    print(f"Charge: {cfg.charge}")
     
     prediction = predictor.predict_single(
-        sequence=args.sequence,
-        precursor_mz=args.precursor_mz,
-        charge=args.charge,
-        max_intensity=args.max_intensity
+        sequence=cfg.sequence,
+        precursor_mz=float(cfg.precursor_mz),
+        charge=int(cfg.charge),
+        max_intensity=cfg.inference.max_intensity
     )
     
     # Print results
@@ -114,20 +118,23 @@ def main():
         print(f"... and {len(prediction['mz']) - 20} more peaks")
     
     # Save to file if specified
-    if args.output:
+    if cfg.output.file is not None:
         mgf_output = predictor.predict_to_mgf_format(
-            sequence=args.sequence,
-            precursor_mz=args.precursor_mz,
-            charge=args.charge,
-            max_intensity=args.max_intensity
+            sequence=cfg.sequence,
+            precursor_mz=float(cfg.precursor_mz),
+            charge=int(cfg.charge),
+            max_intensity=cfg.inference.max_intensity
         )
         
-        with open(args.output, 'w') as f:
+        output_path = cfg.output.file
+        if not os.path.isabs(output_path):
+            output_path = os.path.join(original_cwd, output_path)
+        
+        with open(output_path, 'w') as f:
             f.write(mgf_output)
         
-        print(f"\nPrediction saved to {args.output}")
+        print(f"\nPrediction saved to {output_path}")
 
 
 if __name__ == '__main__':
     main()
-
