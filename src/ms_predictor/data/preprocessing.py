@@ -129,7 +129,9 @@ class SpectrumPreprocessor:
         """
         Prepare target set for training.
         
-        Extracts top-K peaks, normalizes them, and pads to N predictions.
+        Extracts top-K peaks, normalizes them, and creates target arrays.
+        Note: K_real (number of real peaks) can be larger than N (num_predictions).
+        The Hungarian matching algorithm will find the optimal N matches from K_real targets.
         
         Args:
             mz: Array of m/z values
@@ -137,9 +139,12 @@ class SpectrumPreprocessor:
             
         Returns:
             Tuple of (target_mz, target_intensity, target_mask)
-            - target_mz: Shape (N,), normalized m/z values (padded with 0)
-            - target_intensity: Shape (N,), normalized intensities (padded with 0)
-            - target_mask: Shape (N,), 1 for real peaks, 0 for padding
+            - target_mz: Shape (top_k,), normalized m/z values (padded with 0 if k_real < top_k)
+            - target_intensity: Shape (top_k,), normalized intensities (padded with 0 if k_real < top_k)
+            - target_mask: Shape (top_k,), 1 for real peaks, 0 for padding
+            
+            Note: k_real can be anywhere from 0 to top_k. The Hungarian matcher
+            will handle the case where k_real != num_predictions.
         """
         # Extract top-K peaks
         mz_topk, intensity_topk = self.extract_top_k_peaks(mz, intensity)
@@ -148,18 +153,17 @@ class SpectrumPreprocessor:
         mz_norm = self.normalize_mz(mz_topk)
         intensity_norm = self.normalize_intensity(intensity_topk)
         
-        # Create target arrays with padding
+        # Create target arrays padded to top_k (not num_predictions!)
+        # This allows k_real to be larger than num_predictions
         k_real = len(mz_norm)
-        n = self.num_predictions
+        max_targets = self.top_k  # Use top_k as the max size instead of num_predictions
         
-        target_mz = np.zeros(n, dtype=np.float32)
-        target_intensity = np.zeros(n, dtype=np.float32)
-        target_mask = np.zeros(n, dtype=np.float32)
+        target_mz = np.zeros(max_targets, dtype=np.float32)
+        target_intensity = np.zeros(max_targets, dtype=np.float32)
+        target_mask = np.zeros(max_targets, dtype=np.float32)
         
-        # Fill in real peaks
+        # Fill in real peaks (no truncation at num_predictions)
         if k_real > 0:
-            # If we have more than N peaks, take only N
-            k_real = min(k_real, n)
             target_mz[:k_real] = mz_norm[:k_real]
             target_intensity[:k_real] = intensity_norm[:k_real]
             target_mask[:k_real] = 1.0

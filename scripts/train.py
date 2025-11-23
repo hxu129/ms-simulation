@@ -131,12 +131,16 @@ def create_dataloaders(cfg: DictConfig):
         train_dataset = DummyMSDataset(
             num_samples=cfg.data.dummy_train_samples,
             max_length=cfg.model.max_length,
-            num_predictions=cfg.model.num_predictions
+            num_predictions=cfg.model.num_predictions,
+            top_k=cfg.data.top_k,
+            max_mz=cfg.data.max_mz
         )
         val_dataset = DummyMSDataset(
             num_samples=cfg.data.dummy_val_samples,
             max_length=cfg.model.max_length,
-            num_predictions=cfg.model.num_predictions
+            num_predictions=cfg.model.num_predictions,
+            top_k=cfg.data.top_k,
+            max_mz=cfg.data.max_mz
         )
         
         train_loader = DataLoader(
@@ -172,6 +176,9 @@ def create_dataloaders(cfg: DictConfig):
             tokenizer=tokenizer,
             preprocessor=preprocessor,
             max_length=cfg.model.max_length,
+            max_mz=cfg.data.max_mz,
+            top_k=cfg.data.top_k,
+            num_predictions=cfg.model.num_predictions,
             cache_dataframes=cfg.data.get('cache_dataframes', False),
             max_files=cfg.data.get('max_files', None)
         )
@@ -189,6 +196,9 @@ def create_dataloaders(cfg: DictConfig):
             tokenizer=tokenizer,
             preprocessor=preprocessor,
             max_length=cfg.model.max_length,
+            max_mz=cfg.data.max_mz,
+            top_k=cfg.data.top_k,
+            num_predictions=cfg.model.num_predictions,
             cache_in_memory=cfg.data.get('cache_in_memory', False)
         )
     

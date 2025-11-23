@@ -33,7 +33,10 @@ class ParquetMSDataset(Dataset):
         val_split: float = 0.1,
         test_split: float = 0.1,
         cache_dataframes: bool = False,
-        max_files: Optional[int] = None
+        max_files: Optional[int] = None,
+        max_mz: float = 2000.0,
+        top_k: int = 200,
+        num_predictions: int = 100
     ):
         """
         Initialize Parquet dataset.
@@ -49,10 +52,17 @@ class ParquetMSDataset(Dataset):
             test_split: Fraction of data for testing
             cache_dataframes: Whether to cache loaded DataFrames in memory
             max_files: Maximum number of Parquet files to load (None for all)
+            max_mz: Maximum m/z value for normalization
+            top_k: Number of top peaks to extract from spectrum
+            num_predictions: Number of predictions the model will make (N)
         """
         self.data_dir = data_dir
         self.tokenizer = tokenizer or AminoAcidTokenizer()
-        self.preprocessor = preprocessor or SpectrumPreprocessor()
+        self.preprocessor = preprocessor or SpectrumPreprocessor(
+            max_mz=max_mz,
+            top_k=top_k,
+            num_predictions=num_predictions
+        )
         self.max_length = max_length
         self.split = split
         self.cache_dataframes = cache_dataframes
@@ -323,6 +333,10 @@ def create_parquet_dataloaders(
     metadata_file: Optional[str] = None,
     batch_size: int = 32,
     num_workers: int = 4,
+    max_mz: float = 2000.0,
+    top_k: int = 200,
+    num_predictions: int = 100,
+    max_length: int = 50,
     **kwargs
 ):
     """
@@ -333,6 +347,10 @@ def create_parquet_dataloaders(
         metadata_file: Optional metadata JSON file
         batch_size: Batch size
         num_workers: Number of data loading workers
+        max_mz: Maximum m/z value for normalization
+        top_k: Number of top peaks to extract from spectrum
+        num_predictions: Number of predictions the model will make
+        max_length: Maximum sequence length
         **kwargs: Additional arguments for ParquetMSDataset
         
     Returns:
@@ -342,9 +360,21 @@ def create_parquet_dataloaders(
     from .dataset import collate_fn
     
     # Create datasets
-    train_dataset = ParquetMSDataset(data_dir, metadata_file, split='train', **kwargs)
-    val_dataset = ParquetMSDataset(data_dir, metadata_file, split='val', **kwargs)
-    test_dataset = ParquetMSDataset(data_dir, metadata_file, split='test', **kwargs)
+    train_dataset = ParquetMSDataset(
+        data_dir, metadata_file, split='train',
+        max_mz=max_mz, top_k=top_k, num_predictions=num_predictions,
+        max_length=max_length, **kwargs
+    )
+    val_dataset = ParquetMSDataset(
+        data_dir, metadata_file, split='val',
+        max_mz=max_mz, top_k=top_k, num_predictions=num_predictions,
+        max_length=max_length, **kwargs
+    )
+    test_dataset = ParquetMSDataset(
+        data_dir, metadata_file, split='test',
+        max_mz=max_mz, top_k=top_k, num_predictions=num_predictions,
+        max_length=max_length, **kwargs
+    )
     
     # Create dataloaders
     train_loader = DataLoader(

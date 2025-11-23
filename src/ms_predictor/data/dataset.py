@@ -145,7 +145,9 @@ class DummyMSDataset(Dataset):
         self,
         num_samples: int = 100,
         max_length: int = 50,
-        num_predictions: int = 100
+        num_predictions: int = 100,
+        top_k: int = 200,
+        max_mz: float = 2000.0
     ):
         """
         Initialize dummy dataset.
@@ -153,13 +155,19 @@ class DummyMSDataset(Dataset):
         Args:
             num_samples: Number of synthetic samples to generate
             max_length: Maximum sequence length
-            num_predictions: Number of predictions (N)
+            num_predictions: Number of predictions (N) - for reference only
+            top_k: Number of top peaks to extract from spectrum
+            max_mz: Maximum m/z value for normalization
         """
         self.num_samples = num_samples
         self.max_length = max_length
         self.num_predictions = num_predictions
         self.tokenizer = AminoAcidTokenizer()
-        self.preprocessor = SpectrumPreprocessor(num_predictions=num_predictions)
+        self.preprocessor = SpectrumPreprocessor(
+            max_mz=max_mz,
+            top_k=top_k,
+            num_predictions=num_predictions
+        )
     
     def __len__(self) -> int:
         return self.num_samples

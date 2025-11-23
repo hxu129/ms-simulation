@@ -116,7 +116,7 @@ def test_dummy_dataset():
     from ms_predictor.data import DummyMSDataset
     from torch.utils.data import DataLoader
     
-    dataset = DummyMSDataset(num_samples=10, max_length=30, num_predictions=100)
+    dataset = DummyMSDataset(num_samples=10, max_length=30, num_predictions=100, top_k=200, max_mz=2000.0)
     loader = DataLoader(dataset, batch_size=2)
     
     batch = next(iter(loader))
