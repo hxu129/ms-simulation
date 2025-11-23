@@ -15,6 +15,7 @@ from .config import Config
 from ..model.ms_predictor import MSPredictor
 from ..loss.set_loss import SetPredictionLoss
 from ..loss.cosine_loss import CosineSimilarityLoss
+from ..data.data_prefetcher import DataPrefetcher
 
 
 class Trainer:
@@ -156,15 +157,17 @@ class Trainer:
         total_cosine_loss = 0.0
         num_batches = 0
         
-        pbar = tqdm(self.train_loader, desc=f"Epoch {self.epoch + 1}")
+        # Use DataPrefetcher for async data loading (batch already on GPU)
+        prefetcher = DataPrefetcher(self.train_loader, self.device)
+        pbar = tqdm(prefetcher, desc=f"Epoch {self.epoch + 1}", total=len(self.train_loader))
         
         for batch_idx, batch in enumerate(pbar):
-            # Move batch to device
-            batch = {k: v.to(self.device) for k, v in batch.items()}
+            # Batch is already on GPU thanks to DataPrefetcher!
+            # No need for: batch = {k: v.to(self.device) for k, v in batch.items()}
             
             # Forward pass
             with autocast(enabled=self.use_amp):
-                pred_mz, pred_intensity, pred_confidence = self.model(
+                pred_mz, pred_intensity, pred_confidence_logits = self.model(
                     batch['sequence_tokens'],
                     batch['sequence_mask'],
                     batch['precursor_mz'],
@@ -173,7 +176,7 @@ class Trainer:
                 
                 # Compute set prediction loss
                 loss_dict = self.set_loss(
-                    pred_mz, pred_intensity, pred_confidence,
+                    pred_mz, pred_intensity, pred_confidence_logits,
                     batch['target_mz'], batch['target_intensity'], batch['target_mask']
                 )
                 
@@ -182,7 +185,7 @@ class Trainer:
                 # Add cosine similarity loss if enabled
                 if self.cosine_loss is not None:
                     cosine_loss_val = self.cosine_loss(
-                        pred_mz, pred_intensity, pred_confidence,
+                        pred_mz, pred_intensity,
                         batch['target_mz'], batch['target_intensity'], batch['target_mask']
                     )
                     loss = loss + cosine_loss_val
@@ -245,8 +248,10 @@ class Trainer:
         total_cosine_loss = 0.0
         num_batches = 0
         
-        for batch in tqdm(self.val_loader, desc="Validation"):
-            batch = {k: v.to(self.device) for k, v in batch.items()}
+        # Use DataPrefetcher for async data loading (batch already on GPU)
+        prefetcher = DataPrefetcher(self.val_loader, self.device)
+        for batch in tqdm(prefetcher, desc="Validation", total=len(self.val_loader)):
+            # Batch is already on GPU thanks to DataPrefetcher!
             
             pred_mz, pred_intensity, pred_confidence = self.model(
                 batch['sequence_tokens'],
