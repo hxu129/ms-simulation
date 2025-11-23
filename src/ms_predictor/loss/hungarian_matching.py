@@ -68,6 +68,7 @@ class FastHungarianMatcher(nn.Module):
         # Move all data to CPU once
         pred_mz_cpu = pred_mz.cpu().numpy()
         pred_intensity_cpu = pred_intensity.cpu().numpy()
+        predicted_confidence_cpu = predicted_confidence.cpu().numpy()
         target_mz_cpu = target_mz.cpu().numpy()
         target_intensity_cpu = target_intensity.cpu().numpy()
         target_mask_cpu = target_mask.cpu().numpy()
@@ -94,6 +95,7 @@ class FastHungarianMatcher(nn.Module):
             # Shape: (num_predictions, num_real_targets)
             pred_mz_exp = pred_mz_cpu[b, :, np.newaxis]  # (num_predictions, 1)
             pred_int_exp = pred_intensity_cpu[b, :, np.newaxis]  # (num_predictions, 1)
+            predicted_confidence_exp = predicted_confidence_cpu[b, :, np.newaxis]  # (num_predictions, 1)
             
             target_mz_exp = real_target_mz[np.newaxis, :]  # (1, num_real_targets)
             target_int_exp = real_target_intensity[np.newaxis, :]  # (1, num_real_targets)
@@ -106,7 +108,7 @@ class FastHungarianMatcher(nn.Module):
             cost = (
                 self.cost_mz * cost_mz +
                 self.cost_intensity * cost_intensity -
-                predicted_confidence
+                predicted_confidence_exp
             )
             
             # Run Hungarian algorithm
