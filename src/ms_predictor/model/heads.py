@@ -57,7 +57,7 @@ class PredictionHeads(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(intermediate_dim, 1),
-            nn.Sigmoid()  # Output in [0, 1]
+            # nn.Sigmoid()  # Output in [0, 1] # TODO: best practice is to use the sigmoid after the model
         )
     
     def forward(self, decoder_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
