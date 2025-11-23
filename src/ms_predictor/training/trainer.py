@@ -266,9 +266,11 @@ class Trainer:
                 # Add cosine similarity loss if enabled
                 cosine_loss_val = 0.0
                 if self.cosine_loss is not None:
+                    matched_indices = loss_dict.get('matched_indices', None)
                     cosine_loss_val = self.cosine_loss(
                         pred_mz, pred_intensity,
-                        batch['target_mz'], batch['target_intensity'], batch['target_mask']
+                        batch['target_mz'], batch['target_intensity'], batch['target_mask'],
+                        matched_indices=matched_indices
                     )
                     loss = loss + cosine_loss_val
             
