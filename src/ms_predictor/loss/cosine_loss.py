@@ -44,7 +44,6 @@ class CosineSimilarityLoss(nn.Module):
         self,
         mz: torch.Tensor,
         intensity: torch.Tensor,
-        confidence: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Create binned spectrum representation.
@@ -52,7 +51,6 @@ class CosineSimilarityLoss(nn.Module):
         Args:
             mz: m/z values (normalized to [0, 1]), shape (batch_size, num_peaks)
             intensity: Intensity values, shape (batch_size, num_peaks)
-            confidence: Confidence scores (optional), shape (batch_size, num_peaks)
             
         Returns:
             Binned spectrum, shape (batch_size, num_bins)
@@ -67,18 +65,12 @@ class CosineSimilarityLoss(nn.Module):
         bin_indices = (mz_denorm / self.bin_size).long()
         bin_indices = torch.clamp(bin_indices, 0, self.num_bins - 1)
         
-        # Weight intensity by confidence if provided
-        if confidence is not None:
-            weighted_intensity = intensity * confidence
-        else:
-            weighted_intensity = intensity
-        
         # Create binned spectrum
-        binned = torch.zeros(batch_size, self.num_bins, device=device)
+        binned = torch.zeros(batch_size, self.num_bins, device=device, dtype=intensity.dtype)
         
         # Scatter add intensities to bins
         for b in range(batch_size):
-            binned[b].scatter_add_(0, bin_indices[b], weighted_intensity[b])
+            binned[b].scatter_add_(0, bin_indices[b], intensity[b])
         
         # Normalize if requested
         if self.normalize_bins:
@@ -91,7 +83,6 @@ class CosineSimilarityLoss(nn.Module):
         self,
         pred_mz: torch.Tensor,
         pred_intensity: torch.Tensor,
-        pred_confidence: torch.Tensor,
         target_mz: torch.Tensor,
         target_intensity: torch.Tensor,
         target_mask: torch.Tensor
@@ -102,7 +93,6 @@ class CosineSimilarityLoss(nn.Module):
         Args:
             pred_mz: Predicted m/z values, shape (batch_size, num_predictions)
             pred_intensity: Predicted intensities, shape (batch_size, num_predictions)
-            pred_confidence: Predicted confidences, shape (batch_size, num_predictions)
             target_mz: Target m/z values, shape (batch_size, num_targets)
             target_intensity: Target intensities, shape (batch_size, num_targets)
             target_mask: Mask for real targets, shape (batch_size, num_targets)
@@ -111,7 +101,7 @@ class CosineSimilarityLoss(nn.Module):
             Cosine similarity loss (1 - cosine_similarity)
         """
         # Create binned spectra
-        pred_binned = self.create_binned_spectrum(pred_mz, pred_intensity, pred_confidence)
+        pred_binned = self.create_binned_spectrum(pred_mz, pred_intensity)
         
         # For targets, use mask to zero out padding
         target_intensity_masked = target_intensity * target_mask
@@ -157,7 +147,6 @@ class SpectralAngleLoss(nn.Module):
         self,
         mz: torch.Tensor,
         intensity: torch.Tensor,
-        confidence: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """Create binned spectrum (same as CosineSimilarityLoss)."""
         batch_size = mz.size(0)
@@ -167,14 +156,9 @@ class SpectralAngleLoss(nn.Module):
         bin_indices = (mz_denorm / self.bin_size).long()
         bin_indices = torch.clamp(bin_indices, 0, self.num_bins - 1)
         
-        if confidence is not None:
-            weighted_intensity = intensity * confidence
-        else:
-            weighted_intensity = intensity
-        
         binned = torch.zeros(batch_size, self.num_bins, device=device)
         for b in range(batch_size):
-            binned[b].scatter_add_(0, bin_indices[b], weighted_intensity[b])
+            binned[b].scatter_add_(0, bin_indices[b], intensity[b])
         
         return binned
     
@@ -182,7 +166,6 @@ class SpectralAngleLoss(nn.Module):
         self,
         pred_mz: torch.Tensor,
         pred_intensity: torch.Tensor,
-        pred_confidence: torch.Tensor,
         target_mz: torch.Tensor,
         target_intensity: torch.Tensor,
         target_mask: torch.Tensor
@@ -193,7 +176,7 @@ class SpectralAngleLoss(nn.Module):
         Returns:
             Spectral angle in radians (normalized by π)
         """
-        pred_binned = self.create_binned_spectrum(pred_mz, pred_intensity, pred_confidence)
+        pred_binned = self.create_binned_spectrum(pred_mz, pred_intensity)
         target_intensity_masked = target_intensity * target_mask
         target_binned = self.create_binned_spectrum(target_mz, target_intensity_masked)
         
