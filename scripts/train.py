@@ -87,7 +87,8 @@ def create_dataloaders(cfg: DictConfig):
             shuffle=True,
             num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
         )
         
         val_loader = DataLoader(
@@ -96,7 +97,8 @@ def create_dataloaders(cfg: DictConfig):
             shuffle=False,
             num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
         )
     
     elif cfg.data.get('use_parquet', False):
@@ -154,7 +156,8 @@ def create_dataloaders(cfg: DictConfig):
             shuffle=True,
             num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
         )
         
         val_loader = DataLoader(
@@ -163,7 +166,8 @@ def create_dataloaders(cfg: DictConfig):
             shuffle=False,
             num_workers=cfg.data.num_workers,
             collate_fn=collate_fn,
-            pin_memory=True
+            pin_memory=True,
+            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
         )
     
     return train_loader, val_loader
@@ -228,12 +232,29 @@ def main(cfg: DictConfig):
     print("\nCreating trainer...")
     # Convert DictConfig to Config dataclass for Trainer
     config = Config.from_dictconfig(cfg)
+    
+    # DEBUG: Check device configuration
+    print("="*80)
+    print("DEVICE CONFIGURATION CHECK:")
+    print(f"  Config device setting: {config.training.device}")
+    print(f"  CUDA available: {torch.cuda.is_available()}")
+    print(f"  CUDA device count: {torch.cuda.device_count()}")
+    print("="*80)
+    
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
         config=config
     )
+    
+    # DEBUG: Verify trainer device and model location
+    print("="*80)
+    print("TRAINER DEVICE VERIFICATION:")
+    print(f"  Trainer device: {trainer.device}")
+    print(f"  Model device: {next(trainer.model.parameters()).device}")
+    print(f"  Model is on CUDA: {next(trainer.model.parameters()).is_cuda}")
+    print("="*80)
     
     # Resume from checkpoint if specified
     resume_path = cfg.get('resume_path', None)
