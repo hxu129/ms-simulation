@@ -18,7 +18,8 @@ class DecoderLayer(nn.Module):
         hidden_dim: int,
         num_heads: int,
         dim_feedforward: int,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        activation: str = 'gelu'
     ):
         """
         Initialize bidirectional decoder layer.
@@ -30,6 +31,14 @@ class DecoderLayer(nn.Module):
             dropout: Dropout rate
         """
         super().__init__()
+        if activation == 'gelu':
+            activation_fn = nn.GELU()
+        elif activation == 'relu':
+            activation_fn = nn.ReLU()
+        elif activation == 'tanh':
+            activation_fn = nn.Tanh()
+        else:
+            raise ValueError(f"Invalid activation function: {activation}")
         
         # Self-attention (bidirectional)
         self.self_attn = nn.MultiheadAttention(
@@ -50,7 +59,7 @@ class DecoderLayer(nn.Module):
         # Feedforward network
         self.ffn = nn.Sequential(
             nn.Linear(hidden_dim, dim_feedforward),
-            nn.GELU(),
+            activation_fn,
             nn.Dropout(dropout),
             nn.Linear(dim_feedforward, hidden_dim),
             nn.Dropout(dropout)
@@ -112,7 +121,8 @@ class Decoder(nn.Module):
         num_layers: int,
         num_heads: int,
         dim_feedforward: int,
-        dropout: float = 0.1
+        dropout: float = 0.1,
+        activation: str = 'gelu'
     ):
         """
         Initialize custom bidirectional decoder.
@@ -127,7 +137,7 @@ class Decoder(nn.Module):
         super().__init__()
         
         self.layers = nn.ModuleList([
-            DecoderLayer(hidden_dim, num_heads, dim_feedforward, dropout)
+            DecoderLayer(hidden_dim, num_heads, dim_feedforward, dropout, activation)
             for _ in range(num_layers)
         ])
         
