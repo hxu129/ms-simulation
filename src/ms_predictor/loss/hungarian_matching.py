@@ -43,6 +43,7 @@ class FastHungarianMatcher(nn.Module):
         self,
         pred_mz: torch.Tensor,
         pred_intensity: torch.Tensor,
+        predicted_confidence: torch.Tensor,
         target_mz: torch.Tensor,
         target_intensity: torch.Tensor,
         target_mask: torch.Tensor
@@ -104,7 +105,8 @@ class FastHungarianMatcher(nn.Module):
             # Total cost
             cost = (
                 self.cost_mz * cost_mz +
-                self.cost_intensity * cost_intensity 
+                self.cost_intensity * cost_intensity -
+                predicted_confidence
             )
             
             # Run Hungarian algorithm

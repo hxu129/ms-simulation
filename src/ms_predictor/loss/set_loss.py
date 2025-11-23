@@ -83,7 +83,7 @@ class SetPredictionLoss(nn.Module):
         
         # Perform Hungarian matching
         indices = self.matcher(
-            pred_mz, pred_intensity,
+            pred_mz, pred_intensity, pred_confidence_logits.sigmoid(),
             target_mz, target_intensity, target_mask
         )
         
@@ -153,6 +153,7 @@ class SetPredictionLoss(nn.Module):
             'loss_confidence_matched': loss_confidence_matched,
             'loss_confidence_background': loss_confidence_background,
             'num_matched': torch.tensor(num_matched, device=pred_mz.device, dtype=torch.float32),
-            'num_unmatched': torch.tensor(num_unmatched, device=pred_mz.device, dtype=torch.float32)
+            'num_unmatched': torch.tensor(num_unmatched, device=pred_mz.device, dtype=torch.float32),
+            'matched_indices': (batch_idx, pred_idx, target_idx)
         }
 
