@@ -67,27 +67,27 @@ class SpectrumPreprocessor:
     
     def normalize_mz(self, mz: np.ndarray) -> np.ndarray:
         """
-        Keep m/z values as-is (no normalization).
+        Normalize m/z values to [0, 1] range.
         
         Args:
             mz: Array of m/z values
             
         Returns:
-            Original m/z values (unchanged)
+            Normalized m/z values in [0, 1] range
         """
-        return mz
+        return mz / self.max_mz
     
     def denormalize_mz(self, mz_normalized: np.ndarray) -> np.ndarray:
         """
-        Return m/z values as-is (no denormalization needed since normalization is not applied).
+        Denormalize m/z values from [0, 1] back to original scale.
         
         Args:
-            mz_normalized: m/z values (already in absolute scale)
+            mz_normalized: m/z values in [0, 1] range
             
         Returns:
-            Same m/z values (unchanged)
+            m/z values in original scale (0 to max_mz)
         """
-        return mz_normalized
+        return mz_normalized * self.max_mz
     
     def normalize_intensity(self, intensity: np.ndarray) -> np.ndarray:
         """
