@@ -38,10 +38,10 @@ loss:
   loss_mz_weight: 1.0
   loss_intensity_weight: 1.0
   loss_confidence_weight: 1.0
-  background_confidence_weight: 0.1
+  background_confidence_weight: 1.0
   
   # Cosine similarity loss (tunable scaler)
-  use_cosine_loss: true
+  use_cosine_loss: false
   cosine_loss_weight: 0.5
   cosine_bin_size: 1.0
 
@@ -54,8 +54,8 @@ optimizer:
   
   # Learning rate scheduler
   scheduler: cosine
-  warmup_epochs: 5
-  min_lr: 1.0e-06
+  warmup_epochs: 0
+  min_lr: 1.0e-04
   
   # For StepLR
   step_size: 10
@@ -88,4 +88,11 @@ inference:
   confidence_threshold: 0.5
   max_mz: 2000.0
   batch_size: 64
+
+wandb:
+  enabled: true  # Enable/disable wandb logging
+  project: ms-predictor  # Wandb project name
+  entity: null  # Wandb entity/username (optional)
+  mode: online  # online, offline, or disabled
+  log_interval: 10  # Log every N steps
 

@@ -127,6 +127,17 @@ class InferenceConfig:
 
 
 @dataclass
+class WandbConfig:
+    """Wandb logging configuration."""
+    
+    enabled: bool = True
+    project: str = 'ms-predictor'
+    entity: Optional[str] = None
+    mode: str = 'online'  # 'online', 'offline', or 'disabled'
+    log_interval: int = 10  # Log every N steps
+
+
+@dataclass
 class Config:
     """Main configuration."""
     
@@ -136,6 +147,7 @@ class Config:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)
     
     # Experiment settings
     experiment_name: str = 'ms_predictor'
@@ -165,6 +177,7 @@ class Config:
             optimizer=OptimizerConfig(**config_dict.get('optimizer', {})),
             training=TrainingConfig(**config_dict.get('training', {})),
             inference=InferenceConfig(**config_dict.get('inference', {})),
+            wandb=WandbConfig(**config_dict.get('wandb', {})),
             experiment_name=config_dict.get('experiment_name', 'ms_predictor'),
             seed=config_dict.get('seed', 42)
         )
@@ -193,6 +206,7 @@ class Config:
             optimizer=OptimizerConfig(**config_dict.get('optimizer', {})),
             training=TrainingConfig(**config_dict.get('training', {})),
             inference=InferenceConfig(**config_dict.get('inference', {})),
+            wandb=WandbConfig(**config_dict.get('wandb', {})),
             experiment_name=config_dict.get('experiment_name', 'ms_predictor'),
             seed=config_dict.get('seed', 42)
         )
@@ -213,6 +227,7 @@ class Config:
             },
             'training': self.training.__dict__,
             'inference': self.inference.__dict__,
+            'wandb': self.wandb.__dict__,
             'experiment_name': self.experiment_name,
             'seed': self.seed
         }

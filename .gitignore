@@ -67,3 +67,4 @@ ENV/
 obsutil*
 
 outputs/
+wandb/

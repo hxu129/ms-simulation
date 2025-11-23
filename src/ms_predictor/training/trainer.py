@@ -3,6 +3,7 @@ Trainer for MS spectrum predictor.
 """
 
 import os
+import logging
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -16,6 +17,12 @@ from ..model.ms_predictor import MSPredictor
 from ..loss.set_loss import SetPredictionLoss
 from ..loss.cosine_loss import CosineSimilarityLoss
 from ..data.data_prefetcher import DataPrefetcher
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 
 class Trainer:
@@ -46,11 +53,22 @@ class Trainer:
         self.val_loader = val_loader
         self.config = config
         
+        # Set up logger
+        self.logger = logging.getLogger(__name__)
+        
         # Device
         if device is None:
             device = torch.device(config.training.device if torch.cuda.is_available() else 'cpu')
         self.device = device
         self.model.to(self.device)
+        
+        # Initialize wandb
+        self.use_wandb = config.wandb.enabled and WANDB_AVAILABLE
+        if self.use_wandb:
+            if config.wandb.mode == 'disabled':
+                self.use_wandb = False
+            else:
+                self._init_wandb()
         
         # Loss functions
         self.set_loss = SetPredictionLoss(
@@ -90,6 +108,65 @@ class Trainer:
         
         # Checkpoint directory
         os.makedirs(config.training.checkpoint_dir, exist_ok=True)
+    
+    def _init_wandb(self):
+        """Initialize wandb for experiment tracking."""
+        # Count model parameters
+        num_params = sum(p.numel() for p in self.model.parameters())
+        num_trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        
+        # Prepare config dict for wandb
+        wandb_config = {
+            'experiment_name': self.config.experiment_name,
+            'model': {
+                'vocab_size': self.config.model.vocab_size,
+                'hidden_dim': self.config.model.hidden_dim,
+                'num_encoder_layers': self.config.model.num_encoder_layers,
+                'num_decoder_layers': self.config.model.num_decoder_layers,
+                'num_heads': self.config.model.num_heads,
+                'dim_feedforward': self.config.model.dim_feedforward,
+                'num_predictions': self.config.model.num_predictions,
+                'max_length': self.config.model.max_length,
+                'max_charge': self.config.model.max_charge,
+                'dropout': self.config.model.dropout,
+                'activation': self.config.model.activation,
+                'num_parameters': num_params,
+                'num_trainable_parameters': num_trainable,
+            },
+            'optimizer': {
+                'optimizer': self.config.optimizer.optimizer,
+                'learning_rate': self.config.optimizer.learning_rate,
+                'weight_decay': self.config.optimizer.weight_decay,
+                'scheduler': self.config.optimizer.scheduler,
+            },
+            'loss': {
+                'loss_mz_weight': self.config.loss.loss_mz_weight,
+                'loss_intensity_weight': self.config.loss.loss_intensity_weight,
+                'loss_confidence_weight': self.config.loss.loss_confidence_weight,
+                'background_confidence_weight': self.config.loss.background_confidence_weight,
+                'use_cosine_loss': self.config.loss.use_cosine_loss,
+                'cosine_loss_weight': self.config.loss.cosine_loss_weight,
+            },
+            'training': {
+                'num_epochs': self.config.training.num_epochs,
+                'batch_size': self.config.data.batch_size,
+                'gradient_clip': self.config.training.gradient_clip,
+                'mixed_precision': self.config.training.mixed_precision,
+            }
+        }
+        
+        wandb.init(
+            project=self.config.wandb.project,
+            entity=self.config.wandb.entity,
+            name=self.config.experiment_name,
+            config=wandb_config,
+            mode=self.config.wandb.mode,
+        )
+        
+        # Watch model (log gradients and parameters)
+        wandb.watch(self.model, log='all', log_freq=self.config.wandb.log_interval * 10)
+        
+        self.logger.info(f"Wandb initialized: project={self.config.wandb.project}, mode={self.config.wandb.mode}")
     
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """Create optimizer."""
@@ -154,6 +231,10 @@ class Trainer:
         
         total_loss = 0.0
         total_set_loss = 0.0
+        total_mz_loss = 0.0
+        total_intensity_loss = 0.0
+        total_confidence_matched_loss = 0.0
+        total_confidence_background_loss = 0.0
         total_cosine_loss = 0.0
         num_batches = 0
         
@@ -183,13 +264,13 @@ class Trainer:
                 loss = loss_dict['loss']
                 
                 # Add cosine similarity loss if enabled
+                cosine_loss_val = 0.0
                 if self.cosine_loss is not None:
                     cosine_loss_val = self.cosine_loss(
                         pred_mz, pred_intensity,
                         batch['target_mz'], batch['target_intensity'], batch['target_mask']
                     )
                     loss = loss + cosine_loss_val
-                    total_cosine_loss += cosine_loss_val.item()
             
             # Backward pass
             self.optimizer.zero_grad()
@@ -214,8 +295,28 @@ class Trainer:
             # Update statistics
             total_loss += loss.item()
             total_set_loss += loss_dict['loss'].item()
+            total_mz_loss += loss_dict['loss_mz'].item()
+            total_intensity_loss += loss_dict['loss_intensity'].item()
+            total_confidence_matched_loss += loss_dict['loss_confidence_matched'].item()
+            total_confidence_background_loss += loss_dict['loss_confidence_background'].item()
+            if self.cosine_loss is not None:
+                total_cosine_loss += cosine_loss_val.item()
             num_batches += 1
             self.global_step += 1
+            
+            # Log to wandb
+            if self.use_wandb and self.global_step % self.config.wandb.log_interval == 0:
+                wandb.log({
+                    'train/total_loss': loss.item(),
+                    'train/set_loss': loss_dict['loss'].item(),
+                    'train/mz_loss': loss_dict['loss_mz'].item(),
+                    'train/intensity_loss': loss_dict['loss_intensity'].item(),
+                    'train/confidence_loss_matched': loss_dict['loss_confidence_matched'].item(),
+                    'train/confidence_loss_background': loss_dict['loss_confidence_background'].item(),
+                    'train/cosine_loss': cosine_loss_val.item() if self.cosine_loss else 0.0,
+                    'train/learning_rate': self.optimizer.param_groups[0]['lr'],
+                    'global_step': self.global_step,
+                }, step=self.global_step)
             
             # Update progress bar
             if (batch_idx + 1) % self.config.training.log_interval == 0:
@@ -227,6 +328,10 @@ class Trainer:
         return {
             'loss': total_loss / num_batches,
             'set_loss': total_set_loss / num_batches,
+            'mz_loss': total_mz_loss / num_batches,
+            'intensity_loss': total_intensity_loss / num_batches,
+            'confidence_loss_matched': total_confidence_matched_loss / num_batches,
+            'confidence_loss_background': total_confidence_background_loss / num_batches,
             'cosine_loss': total_cosine_loss / num_batches if self.cosine_loss else 0.0
         }
     
@@ -245,6 +350,10 @@ class Trainer:
         
         total_loss = 0.0
         total_set_loss = 0.0
+        total_mz_loss = 0.0
+        total_intensity_loss = 0.0
+        total_confidence_matched_loss = 0.0
+        total_confidence_background_loss = 0.0
         total_cosine_loss = 0.0
         num_batches = 0
         
@@ -267,23 +376,49 @@ class Trainer:
             
             loss = loss_dict['loss']
             
+            cosine_loss_val = 0.0
             if self.cosine_loss is not None:
                 cosine_loss_val = self.cosine_loss(
-                    pred_mz, pred_intensity, pred_confidence,
+                    pred_mz, pred_intensity,
                     batch['target_mz'], batch['target_intensity'], batch['target_mask']
                 )
                 loss = loss + cosine_loss_val
-                total_cosine_loss += cosine_loss_val.item()
             
             total_loss += loss.item()
             total_set_loss += loss_dict['loss'].item()
+            total_mz_loss += loss_dict['loss_mz'].item()
+            total_intensity_loss += loss_dict['loss_intensity'].item()
+            total_confidence_matched_loss += loss_dict['loss_confidence_matched'].item()
+            total_confidence_background_loss += loss_dict['loss_confidence_background'].item()
+            if self.cosine_loss is not None:
+                total_cosine_loss += cosine_loss_val.item()
             num_batches += 1
         
-        return {
+        # Calculate averages
+        avg_metrics = {
             'val_loss': total_loss / num_batches,
             'val_set_loss': total_set_loss / num_batches,
+            'val_mz_loss': total_mz_loss / num_batches,
+            'val_intensity_loss': total_intensity_loss / num_batches,
+            'val_confidence_loss_matched': total_confidence_matched_loss / num_batches,
+            'val_confidence_loss_background': total_confidence_background_loss / num_batches,
             'val_cosine_loss': total_cosine_loss / num_batches if self.cosine_loss else 0.0
         }
+        
+        # Log to wandb
+        if self.use_wandb:
+            wandb.log({
+                'val/total_loss': avg_metrics['val_loss'],
+                'val/set_loss': avg_metrics['val_set_loss'],
+                'val/mz_loss': avg_metrics['val_mz_loss'],
+                'val/intensity_loss': avg_metrics['val_intensity_loss'],
+                'val/confidence_loss_matched': avg_metrics['val_confidence_loss_matched'],
+                'val/confidence_loss_background': avg_metrics['val_confidence_loss_background'],
+                'val/cosine_loss': avg_metrics['val_cosine_loss'],
+                'epoch': self.epoch,
+            }, step=self.global_step)
+        
+        return avg_metrics
     
     def save_checkpoint(self, filename: str):
         """Save checkpoint."""
@@ -298,7 +433,7 @@ class Trainer:
         }
         
         torch.save(checkpoint, filename)
-        print(f"Checkpoint saved to {filename}")
+        self.logger.info(f"Checkpoint saved to {filename}")
     
     def load_checkpoint(self, filename: str):
         """Load checkpoint."""
@@ -314,27 +449,54 @@ class Trainer:
         
         self.best_val_loss = checkpoint['best_val_loss']
         
-        print(f"Checkpoint loaded from {filename}")
+        self.logger.info(f"Checkpoint loaded from {filename}")
     
     def train(self):
         """Main training loop."""
-        print(f"Starting training for {self.config.training.num_epochs} epochs")
-        print(f"Device: {self.device}")
-        print(f"Mixed precision: {self.use_amp}")
+        self.logger.info(f"Starting training for {self.config.training.num_epochs} epochs")
+        self.logger.info(f"Device: {self.device}")
+        self.logger.info(f"Mixed precision: {self.use_amp}")
         
         for epoch in range(self.config.training.num_epochs):
             self.epoch = epoch
             
             # Train
             train_metrics = self.train_epoch()
-            print(f"Epoch {epoch + 1}/{self.config.training.num_epochs}")
-            print(f"  Train loss: {train_metrics['loss']:.4f}")
+            self.logger.info(f"Epoch {epoch + 1}/{self.config.training.num_epochs}")
+            self.logger.info(f"  Train loss: {train_metrics['loss']:.4f}")
+            self.logger.info(f"    - Set loss: {train_metrics['set_loss']:.4f}")
+            self.logger.info(f"    - M/Z loss: {train_metrics['mz_loss']:.4f}")
+            self.logger.info(f"    - Intensity loss: {train_metrics['intensity_loss']:.4f}")
+            self.logger.info(f"    - Confidence loss (matched): {train_metrics['confidence_loss_matched']:.4f}")
+            self.logger.info(f"    - Confidence loss (background): {train_metrics['confidence_loss_background']:.4f}")
+            if self.cosine_loss is not None:
+                self.logger.info(f"    - Cosine loss: {train_metrics['cosine_loss']:.4f}")
+            
+            # Log epoch summary to wandb
+            if self.use_wandb:
+                wandb.log({
+                    'epoch': epoch + 1,
+                    'train/epoch_loss': train_metrics['loss'],
+                    'train/epoch_set_loss': train_metrics['set_loss'],
+                    'train/epoch_mz_loss': train_metrics['mz_loss'],
+                    'train/epoch_intensity_loss': train_metrics['intensity_loss'],
+                    'train/epoch_confidence_loss_matched': train_metrics['confidence_loss_matched'],
+                    'train/epoch_confidence_loss_background': train_metrics['confidence_loss_background'],
+                    'train/epoch_cosine_loss': train_metrics['cosine_loss'],
+                }, step=self.global_step)
             
             # Validate
             if (epoch + 1) % self.config.training.val_interval == 0:
                 val_metrics = self.validate()
                 if val_metrics:
-                    print(f"  Val loss: {val_metrics['val_loss']:.4f}")
+                    self.logger.info(f"  Val loss: {val_metrics['val_loss']:.4f}")
+                    self.logger.info(f"    - Set loss: {val_metrics['val_set_loss']:.4f}")
+                    self.logger.info(f"    - M/Z loss: {val_metrics['val_mz_loss']:.4f}")
+                    self.logger.info(f"    - Intensity loss: {val_metrics['val_intensity_loss']:.4f}")
+                    self.logger.info(f"    - Confidence loss (matched): {val_metrics['val_confidence_loss_matched']:.4f}")
+                    self.logger.info(f"    - Confidence loss (background): {val_metrics['val_confidence_loss_background']:.4f}")
+                    if self.cosine_loss is not None:
+                        self.logger.info(f"    - Cosine loss: {val_metrics['val_cosine_loss']:.4f}")
                     
                     # Check for improvement
                     if val_metrics['val_loss'] < self.best_val_loss:
@@ -353,7 +515,7 @@ class Trainer:
                     # Early stopping
                     if (self.config.training.early_stopping and
                         self.epochs_without_improvement >= self.config.training.early_stopping_patience):
-                        print(f"Early stopping after {epoch + 1} epochs")
+                        self.logger.info(f"Early stopping after {epoch + 1} epochs")
                         break
             
             # Save checkpoint
@@ -379,5 +541,10 @@ class Trainer:
                     else:
                         self.scheduler.step()
         
-        print("Training complete!")
+        self.logger.info("Training complete!")
+        
+        # Finish wandb run
+        if self.use_wandb:
+            wandb.finish()
+            self.logger.info("Wandb run finished")
 

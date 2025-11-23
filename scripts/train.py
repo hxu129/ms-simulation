@@ -24,6 +24,7 @@ import torch
 import numpy as np
 import random
 import os
+import logging
 from torch.utils.data import DataLoader
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -39,6 +40,61 @@ from ms_predictor.data.tokenizer import AminoAcidTokenizer
 from ms_predictor.data.preprocessing import SpectrumPreprocessor
 from ms_predictor.training.config import Config
 from ms_predictor.training.trainer import Trainer
+
+
+class TqdmFilter(logging.Filter):
+    """Filter out tqdm progress bar output from logs."""
+    
+    def filter(self, record):
+        # Filter out log records that contain tqdm-related messages
+        # We look for common tqdm patterns in the message
+        msg = record.getMessage()
+        # Filter out lines that look like progress bars
+        if any(pattern in msg for pattern in ['%|', 'it/s', 's/it', 'Epoch', '/s]']):
+            # Check if it's from tqdm (simple heuristic)
+            if hasattr(record, 'name') and 'tqdm' in record.name.lower():
+                return False
+        return True
+
+
+def setup_logging(log_file: str = 'train.log'):
+    """
+    Set up logging to both file and console.
+    
+    File logging: saves all output except tqdm progress bars
+    Console logging: shows everything including tqdm
+    
+    Args:
+        log_file: Path to log file
+    """
+    # Create logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Remove any existing handlers
+    logger.handlers = []
+    
+    # Create formatters
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    simple_formatter = logging.Formatter('%(message)s')
+    
+    # File handler - saves detailed logs without tqdm
+    file_handler = logging.FileHandler(log_file, mode='w')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(detailed_formatter)
+    file_handler.addFilter(TqdmFilter())  # Filter out tqdm from file
+    logger.addHandler(file_handler)
+    
+    # Console handler - shows everything
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(simple_formatter)
+    logger.addHandler(console_handler)
+    
+    return logger
 
 
 def set_seed(seed: int):
@@ -61,6 +117,8 @@ def create_dataloaders(cfg: DictConfig):
     Returns:
         Tuple of (train_loader, val_loader)
     """
+    logger = logging.getLogger(__name__)
+    
     tokenizer = AminoAcidTokenizer()
     preprocessor = SpectrumPreprocessor(
         max_mz=cfg.data.max_mz,
@@ -69,7 +127,7 @@ def create_dataloaders(cfg: DictConfig):
     )
     
     if cfg.data.use_dummy_data:
-        print("Using dummy data for training (real data not available)")
+        logger.info("Using dummy data for training (real data not available)")
         train_dataset = DummyMSDataset(
             num_samples=cfg.data.dummy_train_samples,
             max_length=cfg.model.max_length,
@@ -103,8 +161,8 @@ def create_dataloaders(cfg: DictConfig):
     
     elif cfg.data.get('use_parquet', False):
         # Use Parquet dataset (default for OBS data)
-        print("Using Parquet data from OBS")
-        print(f"Data directory: {cfg.data.train_data_path}")
+        logger.info("Using Parquet data from OBS")
+        logger.info(f"Data directory: {cfg.data.train_data_path}")
         
         train_loader, val_loader, _ = create_parquet_dataloaders(
             data_dir=cfg.data.train_data_path,
@@ -120,8 +178,8 @@ def create_dataloaders(cfg: DictConfig):
     
     elif cfg.data.get('use_hdf5', False) or (cfg.data.train_data_path and os.path.isdir(cfg.data.train_data_path) and any(f.endswith('.hdf5') for f in os.listdir(cfg.data.train_data_path))):
         # Use HDF5 dataset
-        print("Using HDF5 data from OBS")
-        print(f"Data directory: {cfg.data.train_data_path}")
+        logger.info("Using HDF5 data from OBS")
+        logger.info(f"Data directory: {cfg.data.train_data_path}")
         
         train_loader, val_loader, _ = create_hdf5_dataloaders(
             data_dir=cfg.data.train_data_path,
@@ -181,12 +239,15 @@ def main(cfg: DictConfig):
     Args:
         cfg: Hydra configuration object (DictConfig)
     """
+    # Set up logging (saves to train.log in current output directory)
+    logger = setup_logging('train.log')
+    
     # Print configuration
-    print("=" * 80)
-    print("Training Configuration:")
-    print("=" * 80)
-    print(OmegaConf.to_yaml(cfg))
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("Training Configuration:")
+    logger.info("=" * 80)
+    logger.info(OmegaConf.to_yaml(cfg))
+    logger.info("=" * 80)
     
     # Get the original working directory (Hydra changes cwd to outputs/)
     original_cwd = hydra.utils.get_original_cwd()
@@ -195,22 +256,22 @@ def main(cfg: DictConfig):
     # config = Config.from_dictconfig(cfg)
     # For this implementation, we'll work directly with DictConfig
     
-    print(f"Experiment name: {cfg.experiment_name}")
-    print(f"Working directory: {os.getcwd()}")
-    print(f"Original directory: {original_cwd}")
+    logger.info(f"Experiment name: {cfg.experiment_name}")
+    logger.info(f"Working directory: {os.getcwd()}")
+    logger.info(f"Original directory: {original_cwd}")
     
     # Set seed
     set_seed(cfg.seed)
-    print(f"Random seed set to {cfg.seed}")
+    logger.info(f"Random seed set to {cfg.seed}")
     
     # Create dataloaders
-    print("\nCreating dataloaders...")
+    logger.info("\nCreating dataloaders...")
     train_loader, val_loader = create_dataloaders(cfg)
-    print(f"Training samples: {len(train_loader.dataset)}")
-    print(f"Validation samples: {len(val_loader.dataset)}")
+    logger.info(f"Training samples: {len(train_loader.dataset)}")
+    logger.info(f"Validation samples: {len(val_loader.dataset)}")
     
     # Create model
-    print("\nCreating model...")
+    logger.info("\nCreating model...")
     model = MSPredictor(
         vocab_size=cfg.model.vocab_size,
         hidden_dim=cfg.model.hidden_dim,
@@ -226,20 +287,20 @@ def main(cfg: DictConfig):
     )
     
     num_params = count_parameters(model)
-    print(f"Model parameters: {num_params:,}")
+    logger.info(f"Model parameters: {num_params:,}")
     
     # Create trainer
-    print("\nCreating trainer...")
+    logger.info("\nCreating trainer...")
     # Convert DictConfig to Config dataclass for Trainer
     config = Config.from_dictconfig(cfg)
     
     # DEBUG: Check device configuration
-    print("="*80)
-    print("DEVICE CONFIGURATION CHECK:")
-    print(f"  Config device setting: {config.training.device}")
-    print(f"  CUDA available: {torch.cuda.is_available()}")
-    print(f"  CUDA device count: {torch.cuda.device_count()}")
-    print("="*80)
+    logger.info("="*80)
+    logger.info("DEVICE CONFIGURATION CHECK:")
+    logger.info(f"  Config device setting: {config.training.device}")
+    logger.info(f"  CUDA available: {torch.cuda.is_available()}")
+    logger.info(f"  CUDA device count: {torch.cuda.device_count()}")
+    logger.info("="*80)
     
     trainer = Trainer(
         model=model,
@@ -249,12 +310,12 @@ def main(cfg: DictConfig):
     )
     
     # DEBUG: Verify trainer device and model location
-    print("="*80)
-    print("TRAINER DEVICE VERIFICATION:")
-    print(f"  Trainer device: {trainer.device}")
-    print(f"  Model device: {next(trainer.model.parameters()).device}")
-    print(f"  Model is on CUDA: {next(trainer.model.parameters()).is_cuda}")
-    print("="*80)
+    logger.info("="*80)
+    logger.info("TRAINER DEVICE VERIFICATION:")
+    logger.info(f"  Trainer device: {trainer.device}")
+    logger.info(f"  Model device: {next(trainer.model.parameters()).device}")
+    logger.info(f"  Model is on CUDA: {next(trainer.model.parameters()).is_cuda}")
+    logger.info("="*80)
     
     # Resume from checkpoint if specified
     resume_path = cfg.get('resume_path', None)
@@ -262,15 +323,15 @@ def main(cfg: DictConfig):
         # Handle relative paths from original working directory
         if not os.path.isabs(resume_path):
             resume_path = os.path.join(original_cwd, resume_path)
-        print(f"\nResuming from checkpoint: {resume_path}")
+        logger.info(f"\nResuming from checkpoint: {resume_path}")
         trainer.load_checkpoint(resume_path)
     
     # Train
-    print("\nStarting training...\n")
+    logger.info("\nStarting training...\n")
     trainer.train()
     
-    print("\nTraining complete!")
-    print(f"Outputs saved to: {os.getcwd()}")
+    logger.info("\nTraining complete!")
+    logger.info(f"Outputs saved to: {os.getcwd()}")
 
 
 if __name__ == '__main__':
