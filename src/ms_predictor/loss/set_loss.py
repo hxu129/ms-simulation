@@ -7,7 +7,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Dict, Tuple
 
-from .hungarian_matching import HungarianMatcher, get_matched_pairs
+# Matching algorithm options (benchmarked on batch_size=128):
+# 1. FastHungarianMatcher (RECOMMENDED): 10.5ms, exact, 3.8x faster than original
+from .hungarian_matching import FastHungarianMatcher as HungarianMatcher, get_matched_pairs
+# 2. HungarianMatcher (Original): 39.7ms, exact but slow (multiple CPU-GPU transfers)
+# from .hungarian_matching import HungarianMatcher, get_matched_pairs
+# 3. GreedyMatcher: 278ms, slow + only 74.7% match quality (NOT recommended)
+# from .hungarian_matching_greedy import GreedyMatcher as HungarianMatcher, get_matched_pairs
 
 
 class SetPredictionLoss(nn.Module):
@@ -42,7 +48,7 @@ class SetPredictionLoss(nn.Module):
         """
         super().__init__()
         
-        self.matcher = HungarianMatcher(cost_mz, cost_intensity, cost_confidence)
+        self.matcher = HungarianMatcher(cost_mz, cost_intensity)
         
         self.loss_mz_weight = loss_mz_weight
         self.loss_intensity_weight = loss_intensity_weight
@@ -53,7 +59,7 @@ class SetPredictionLoss(nn.Module):
         self,
         pred_mz: torch.Tensor,
         pred_intensity: torch.Tensor,
-        pred_confidence: torch.Tensor,
+        pred_confidence_logits: torch.Tensor,
         target_mz: torch.Tensor,
         target_intensity: torch.Tensor,
         target_mask: torch.Tensor
@@ -77,7 +83,7 @@ class SetPredictionLoss(nn.Module):
         
         # Perform Hungarian matching
         indices = self.matcher(
-            pred_mz, pred_intensity, pred_confidence,
+            pred_mz, pred_intensity,
             target_mz, target_intensity, target_mask
         )
         
@@ -99,7 +105,8 @@ class SetPredictionLoss(nn.Module):
             # Get matched predictions and targets
             matched_pred_mz = pred_mz[batch_idx, pred_idx]
             matched_pred_intensity = pred_intensity[batch_idx, pred_idx]
-            matched_pred_confidence = pred_confidence[batch_idx, pred_idx]
+            # TODO: best practice is to use the sigmoid after the model
+            matched_pred_confidence_logits = pred_confidence_logits[batch_idx, pred_idx]
             
             matched_target_mz = target_mz[batch_idx, target_idx]
             matched_target_intensity = target_intensity[batch_idx, target_idx]
@@ -111,9 +118,9 @@ class SetPredictionLoss(nn.Module):
             loss_intensity = F.l1_loss(matched_pred_intensity, matched_target_intensity)
             
             # Binary cross-entropy for confidence (target = 1 for matched predictions)
-            target_confidence_matched = torch.ones_like(matched_pred_confidence)
-            loss_confidence_matched = F.binary_cross_entropy(
-                matched_pred_confidence,
+            target_confidence_matched = torch.ones_like(matched_pred_confidence_logits)
+            loss_confidence_matched = F.binary_cross_entropy_with_logits(
+                matched_pred_confidence_logits,
                 target_confidence_matched
             )
         
@@ -122,12 +129,12 @@ class SetPredictionLoss(nn.Module):
         num_unmatched = unmatched_pred_mask.sum().item()
         
         if num_unmatched > 0:
-            unmatched_pred_confidence = pred_confidence[unmatched_pred_mask]
+            unmatched_pred_confidence_logits = pred_confidence_logits[unmatched_pred_mask]
             
             # Binary cross-entropy for confidence (target = 0 for unmatched predictions)
-            target_confidence_background = torch.zeros_like(unmatched_pred_confidence)
-            loss_confidence_background = F.binary_cross_entropy(
-                unmatched_pred_confidence,
+            target_confidence_background = torch.zeros_like(unmatched_pred_confidence_logits)
+            loss_confidence_background = F.binary_cross_entropy_with_logits(
+                unmatched_pred_confidence_logits,
                 target_confidence_background
             )
         
