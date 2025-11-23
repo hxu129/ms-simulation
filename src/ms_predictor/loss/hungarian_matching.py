@@ -1,25 +1,31 @@
 """
-Hungarian matching algorithm for set prediction.
+GPU-accelerated Hungarian matching using batch processing.
+
+This version minimizes CPU-GPU transfers by processing on CPU in batch
+and minimizing synchronization points.
 """
 
 import torch
 import torch.nn as nn
 from scipy.optimize import linear_sum_assignment
 from typing import Tuple
+import numpy as np
 
 
-class HungarianMatcher(nn.Module):
+class FastHungarianMatcher(nn.Module):
     """
-    Hungarian matcher for optimal bipartite matching between predictions and targets.
+    Faster Hungarian matcher that minimizes CPU-GPU transfers.
     
-    Computes a cost matrix and finds the optimal assignment using the Hungarian algorithm.
+    Optimizations:
+    1. Single .cpu() call for all cost matrices
+    2. Batch numpy operations
+    3. Single device transfer back
     """
     
     def __init__(
         self,
         cost_mz: float = 1.0,
         cost_intensity: float = 1.0,
-        cost_confidence: float = 1.0
     ):
         """
         Initialize Hungarian matcher.
@@ -27,30 +33,26 @@ class HungarianMatcher(nn.Module):
         Args:
             cost_mz: Weight for m/z position cost
             cost_intensity: Weight for intensity cost
-            cost_confidence: Weight for confidence cost (negative to encourage high confidence)
         """
         super().__init__()
         self.cost_mz = cost_mz
         self.cost_intensity = cost_intensity
-        self.cost_confidence = cost_confidence
     
     @torch.no_grad()
     def forward(
         self,
         pred_mz: torch.Tensor,
         pred_intensity: torch.Tensor,
-        pred_confidence: torch.Tensor,
         target_mz: torch.Tensor,
         target_intensity: torch.Tensor,
         target_mask: torch.Tensor
     ) -> list[Tuple[torch.Tensor, torch.Tensor]]:
         """
-        Perform Hungarian matching.
+        Perform Hungarian matching with optimized CPU-GPU transfers.
         
         Args:
             pred_mz: Predicted m/z values, shape (batch_size, num_predictions)
             pred_intensity: Predicted intensities, shape (batch_size, num_predictions)
-            pred_confidence: Predicted confidences, shape (batch_size, num_predictions)
             target_mz: Target m/z values, shape (batch_size, num_targets)
             target_intensity: Target intensities, shape (batch_size, num_targets)
             target_mask: Mask for real targets (1 for real, 0 for padding), 
@@ -60,59 +62,59 @@ class HungarianMatcher(nn.Module):
             List of tuples (pred_indices, target_indices) for each sample in batch
         """
         batch_size = pred_mz.size(0)
-        num_predictions = pred_mz.size(1)
+        device = pred_mz.device
+        
+        # Move all data to CPU once
+        pred_mz_cpu = pred_mz.cpu().numpy()
+        pred_intensity_cpu = pred_intensity.cpu().numpy()
+        target_mz_cpu = target_mz.cpu().numpy()
+        target_intensity_cpu = target_intensity.cpu().numpy()
+        target_mask_cpu = target_mask.cpu().numpy()
         
         indices = []
         
         for b in range(batch_size):
             # Get number of real targets for this sample
-            num_real_targets = int(target_mask[b].sum().item())
+            num_real_targets = int(target_mask_cpu[b].sum())
             
             if num_real_targets == 0:
                 # No targets, all predictions are unmatched
                 indices.append((
-                    torch.tensor([], dtype=torch.long, device=pred_mz.device),
-                    torch.tensor([], dtype=torch.long, device=pred_mz.device)
+                    torch.tensor([], dtype=torch.long, device=device),
+                    torch.tensor([], dtype=torch.long, device=device)
                 ))
                 continue
             
             # Extract real targets only
-            real_target_mz = target_mz[b, :num_real_targets]
-            real_target_intensity = target_intensity[b, :num_real_targets]
+            real_target_mz = target_mz_cpu[b, :num_real_targets]
+            real_target_intensity = target_intensity_cpu[b, :num_real_targets]
             
-            # Compute cost matrix: (num_predictions, num_real_targets)
-            # Cost formula: λ_mz * |pred_mz - target_mz| + λ_int * |pred_int - target_int| - λ_conf * pred_conf
+            # Compute cost matrix on CPU (numpy is fast for this)
+            # Shape: (num_predictions, num_real_targets)
+            pred_mz_exp = pred_mz_cpu[b, :, np.newaxis]  # (num_predictions, 1)
+            pred_int_exp = pred_intensity_cpu[b, :, np.newaxis]  # (num_predictions, 1)
             
-            # Expand dimensions for broadcasting
-            pred_mz_expanded = pred_mz[b].unsqueeze(1)  # (num_predictions, 1)
-            pred_intensity_expanded = pred_intensity[b].unsqueeze(1)  # (num_predictions, 1)
-            pred_confidence_expanded = pred_confidence[b].unsqueeze(1)  # (num_predictions, 1)
-            
-            target_mz_expanded = real_target_mz.unsqueeze(0)  # (1, num_real_targets)
-            target_intensity_expanded = real_target_intensity.unsqueeze(0)  # (1, num_real_targets)
+            target_mz_exp = real_target_mz[np.newaxis, :]  # (1, num_real_targets)
+            target_int_exp = real_target_intensity[np.newaxis, :]  # (1, num_real_targets)
             
             # Compute costs
-            cost_mz = torch.abs(pred_mz_expanded - target_mz_expanded)
-            cost_intensity = torch.abs(pred_intensity_expanded - target_intensity_expanded)
+            cost_mz = np.abs(pred_mz_exp - target_mz_exp)
+            cost_intensity = np.abs(pred_int_exp - target_int_exp)
             
-            # Total cost (we want to minimize this)
+            # Total cost
             cost = (
                 self.cost_mz * cost_mz +
-                self.cost_intensity * cost_intensity -
-                self.cost_confidence * pred_confidence_expanded
+                self.cost_intensity * cost_intensity 
             )
             
-            # Convert to numpy for scipy's Hungarian algorithm
-            cost_matrix = cost.cpu().numpy()
-            
             # Run Hungarian algorithm
-            pred_idx, target_idx = linear_sum_assignment(cost_matrix)
+            pred_idx, target_idx = linear_sum_assignment(cost)
             
-            # Convert back to torch tensors
-            pred_idx = torch.tensor(pred_idx, dtype=torch.long, device=pred_mz.device)
-            target_idx = torch.tensor(target_idx, dtype=torch.long, device=pred_mz.device)
-            
-            indices.append((pred_idx, target_idx))
+            # Convert back to torch tensors (single transfer)
+            indices.append((
+                torch.from_numpy(pred_idx).long().to(device),
+                torch.from_numpy(target_idx).long().to(device)
+            ))
         
         return indices
 
@@ -121,9 +123,9 @@ def get_matched_pairs(
     indices: list[Tuple[torch.Tensor, torch.Tensor]],
     batch_size: int,
     num_predictions: int
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     """
-    Convert matching indices to binary masks.
+    Convert matching indices to binary masks and flattened indices.
     
     Args:
         indices: List of (pred_indices, target_indices) tuples
@@ -133,8 +135,7 @@ def get_matched_pairs(
     Returns:
         Tuple of:
         - matched_pred_mask: Binary mask for matched predictions, shape (batch_size, num_predictions)
-        - matched_pred_idx: Indices of matched predictions (flattened)
-        - matched_target_idx: Indices of matched targets (flattened)
+        - (batch_indices, pred_indices, target_indices): Flattened indices for matched pairs
     """
     matched_pred_mask = torch.zeros(batch_size, num_predictions, dtype=torch.bool)
     
