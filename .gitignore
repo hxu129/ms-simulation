@@ -68,3 +68,6 @@ obsutil*
 
 outputs/
 wandb/
+
+# cache
+__pycache__/
