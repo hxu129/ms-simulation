@@ -109,25 +109,6 @@ def test_loss_computation():
     print(f"✓ Cosine similarity loss computed: {cos_loss_val.item():.4f}")
 
 
-def test_dummy_dataset():
-    """Test dummy dataset."""
-    print("\nTesting dummy dataset...")
-    
-    from ms_predictor.data import DummyMSDataset
-    from torch.utils.data import DataLoader
-    
-    dataset = DummyMSDataset(num_samples=10, max_length=30, num_predictions=100, top_k=200, max_mz=2000.0)
-    loader = DataLoader(dataset, batch_size=2)
-    
-    batch = next(iter(loader))
-    
-    print(f"✓ Dummy dataset created")
-    print(f"  Batch keys: {list(batch.keys())}")
-    print(f"  Batch shapes:")
-    for key, value in batch.items():
-        print(f"    {key}: {value.shape}")
-
-
 def test_config_system():
     """Test configuration system."""
     print("\nTesting configuration system...")
@@ -160,10 +141,7 @@ def main():
         # Test 3: Loss computation
         test_loss_computation()
         
-        # Test 4: Dummy dataset
-        test_dummy_dataset()
-        
-        # Test 5: Configuration
+        # Test 4: Configuration
         test_config_system()
         
         print("\n" + "=" * 60)

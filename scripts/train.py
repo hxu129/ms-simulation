@@ -33,9 +33,7 @@ import sys
 sys.path.insert(0, '/root/ms/src')
 
 from ms_predictor.model.ms_predictor import MSPredictor, count_parameters
-from ms_predictor.data.dataset import MSDataset, DummyMSDataset, collate_fn
-from ms_predictor.data.hdf5_dataset import HDF5MSDataset, create_hdf5_dataloaders
-from ms_predictor.data.parquet_dataset import ParquetMSDataset, create_parquet_dataloaders
+from ms_predictor.data.parquet_dataset import ParquetMSDataset, create_parquet_dataloaders, collate_fn
 from ms_predictor.data.tokenizer import AminoAcidTokenizer
 from ms_predictor.data.preprocessing import SpectrumPreprocessor
 from ms_predictor.training.config import Config
@@ -111,6 +109,8 @@ def create_dataloaders(cfg: DictConfig):
     """
     Create training and validation dataloaders.
     
+    Only Parquet format is supported.
+    
     Args:
         cfg: Hydra DictConfig object
         
@@ -126,117 +126,24 @@ def create_dataloaders(cfg: DictConfig):
         num_predictions=cfg.model.num_predictions
     )
     
-    if cfg.data.use_dummy_data:
-        logger.info("Using dummy data for training (real data not available)")
-        train_dataset = DummyMSDataset(
-            num_samples=cfg.data.dummy_train_samples,
-            max_length=cfg.model.max_length,
-            num_predictions=cfg.model.num_predictions,
-            top_k=cfg.data.top_k,
-            max_mz=cfg.data.max_mz
-        )
-        val_dataset = DummyMSDataset(
-            num_samples=cfg.data.dummy_val_samples,
-            max_length=cfg.model.max_length,
-            num_predictions=cfg.model.num_predictions,
-            top_k=cfg.data.top_k,
-            max_mz=cfg.data.max_mz
-        )
-        
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=cfg.data.batch_size,
-            shuffle=True,
-            num_workers=cfg.data.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
-            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
-        )
-        
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=cfg.data.batch_size,
-            shuffle=False,
-            num_workers=cfg.data.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
-            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
-        )
+    # Use Parquet dataset (only supported format)
+    logger.info("Loading Parquet data")
+    logger.info(f"Data directory: {cfg.data.train_data_path}")
     
-    elif cfg.data.get('use_parquet', False):
-        # Use Parquet dataset (default for OBS data)
-        logger.info("Using Parquet data from OBS")
-        logger.info(f"Data directory: {cfg.data.train_data_path}")
-        
-        train_loader, val_loader, _ = create_parquet_dataloaders(
-            data_dir=cfg.data.train_data_path,
-            metadata_file=cfg.data.get('metadata_file', None),
-            batch_size=cfg.data.batch_size,
-            num_workers=cfg.data.num_workers,
-            tokenizer=tokenizer,
-            preprocessor=preprocessor,
-            max_length=cfg.model.max_length,
-            max_mz=cfg.data.max_mz,
-            top_k=cfg.data.top_k,
-            num_predictions=cfg.model.num_predictions,
-            cache_dataframes=cfg.data.get('cache_dataframes', False),
-            max_files=cfg.data.get('max_files', None)
-        )
-    
-    elif cfg.data.get('use_hdf5', False) or (cfg.data.train_data_path and os.path.isdir(cfg.data.train_data_path) and any(f.endswith('.hdf5') for f in os.listdir(cfg.data.train_data_path))):
-        # Use HDF5 dataset
-        logger.info("Using HDF5 data from OBS")
-        logger.info(f"Data directory: {cfg.data.train_data_path}")
-        
-        train_loader, val_loader, _ = create_hdf5_dataloaders(
-            data_dir=cfg.data.train_data_path,
-            metadata_file=cfg.data.get('metadata_file', None),
-            batch_size=cfg.data.batch_size,
-            num_workers=cfg.data.num_workers,
-            tokenizer=tokenizer,
-            preprocessor=preprocessor,
-            max_length=cfg.model.max_length,
-            max_mz=cfg.data.max_mz,
-            top_k=cfg.data.top_k,
-            num_predictions=cfg.model.num_predictions,
-            cache_in_memory=cfg.data.get('cache_in_memory', False)
-        )
-    
-    else:
-        train_dataset = MSDataset(
-            data_path=cfg.data.train_data_path,
-            tokenizer=tokenizer,
-            preprocessor=preprocessor,
-            max_length=cfg.model.max_length,
-            split='train'
-        )
-        val_dataset = MSDataset(
-            data_path=cfg.data.val_data_path,
-            tokenizer=tokenizer,
-            preprocessor=preprocessor,
-            max_length=cfg.model.max_length,
-            split='val'
-        )
-        
-        train_loader = DataLoader(
-            train_dataset,
-            batch_size=cfg.data.batch_size,
-            shuffle=True,
-            num_workers=cfg.data.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
-            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
-        )
-        
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=cfg.data.batch_size,
-            shuffle=False,
-            num_workers=cfg.data.num_workers,
-            collate_fn=collate_fn,
-            pin_memory=True,
-            persistent_workers=True if cfg.data.num_workers > 0 else False  # OPTIMIZED
-        )
+    train_loader, val_loader, _ = create_parquet_dataloaders(
+        data_dir=cfg.data.train_data_path,
+        metadata_file=cfg.data.get('metadata_file', None),
+        batch_size=cfg.data.batch_size,
+        num_workers=cfg.data.num_workers,
+        tokenizer=tokenizer,
+        preprocessor=preprocessor,
+        max_length=cfg.model.max_length,
+        max_mz=cfg.data.max_mz,
+        top_k=cfg.data.top_k,
+        num_predictions=cfg.model.num_predictions,
+        cache_dataframes=cfg.data.get('cache_dataframes', False),
+        max_files=cfg.data.get('max_files', None)
+    )
     
     return train_loader, val_loader
 

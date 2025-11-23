@@ -1,5 +1,7 @@
 """
 Parquet Dataset loader for MassIVE-KB and ProteomeTools data.
+
+This is the only supported data loading format for the MS predictor.
 """
 
 import os
@@ -13,6 +15,31 @@ from pathlib import Path
 
 from .tokenizer import AminoAcidTokenizer
 from .preprocessing import SpectrumPreprocessor
+
+
+def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+    """
+    Collate function for DataLoader.
+    
+    Args:
+        batch: List of samples from dataset
+        
+    Returns:
+        Batched dictionary
+    """
+    if len(batch) == 0:
+        return {}
+    
+    # Pre-allocate result dict
+    keys = batch[0].keys()
+    result = {}
+    
+    # Stack each field efficiently
+    for key in keys:
+        # Direct stack - PyTorch optimizes this internally
+        result[key] = torch.stack([sample[key] for sample in batch], dim=0)
+    
+    return result
 
 
 class ParquetMSDataset(Dataset):
@@ -357,7 +384,6 @@ def create_parquet_dataloaders(
         Tuple of (train_loader, val_loader, test_loader)
     """
     from torch.utils.data import DataLoader
-    from .dataset import collate_fn
     
     # Create datasets
     train_dataset = ParquetMSDataset(
