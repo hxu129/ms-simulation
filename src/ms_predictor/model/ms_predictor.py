@@ -161,7 +161,6 @@ class MSPredictor(nn.Module):
         decoder_output = self.decoder(
             tgt=queries,
             memory=encoder_output,
-            tgt_mask=None,  # No causal mask for bidirectional attention
             memory_key_padding_mask=encoder_padding_mask
         )
         # decoder_output shape: (batch_size, num_predictions, hidden_dim)
