@@ -12,7 +12,8 @@ model:
   num_predictions: 150
 
 data:
-  batch_size: 16
+  batch_size: 64
+  num_workers: 8
 
 training:
   num_epochs: 200
@@ -20,7 +21,7 @@ training:
   gradient_clip: 0.5
 
 optimizer:
-  learning_rate: 5.0e-05
-  warmup_epochs: 10
+  learning_rate: 1.0e-04
+  warmup_epochs: 0
 
 

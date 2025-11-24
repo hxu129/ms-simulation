@@ -40,9 +40,6 @@ data:
   max_mz: 2000.0
   top_k: 200
   
-  # Not used for Parquet data
-  dummy_train_samples: 1000
-  dummy_val_samples: 200
 
 loss:
   # Hungarian matching costs
