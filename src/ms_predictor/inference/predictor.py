@@ -7,8 +7,9 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional
 
 from ..model.ms_predictor import MSPredictor
-from ..data.tokenizer import AminoAcidTokenizer
+from ..data.tokenizer import AminoAcidTokenizer, ModificationTokenizer
 from ..data.preprocessing import SpectrumPreprocessor
+from ..data.modification_parser import ModificationParser
 
 
 class SpectrumPredictor:
@@ -20,6 +21,7 @@ class SpectrumPredictor:
         self,
         model: MSPredictor,
         tokenizer: Optional[AminoAcidTokenizer] = None,
+        mod_tokenizer: Optional[ModificationTokenizer] = None,
         confidence_threshold: float = 0.5,
         max_mz: float = 2000.0,
         device: Optional[torch.device] = None
@@ -30,12 +32,15 @@ class SpectrumPredictor:
         Args:
             model: Trained MSPredictor model
             tokenizer: Amino acid tokenizer (creates new one if None)
+            mod_tokenizer: Modification tokenizer (creates new one if None)
             confidence_threshold: Threshold for filtering predictions
             max_mz: Maximum m/z value for denormalization
             device: Device to use (defaults to CUDA if available)
         """
         self.model = model
         self.tokenizer = tokenizer or AminoAcidTokenizer()
+        self.mod_tokenizer = mod_tokenizer or ModificationTokenizer(['ox'])
+        self.mod_parser = ModificationParser()
         self.confidence_threshold = confidence_threshold
         self.max_mz = max_mz
         
@@ -58,7 +63,7 @@ class SpectrumPredictor:
         Predict spectrum for a single peptide sequence.
         
         Args:
-            sequence: Amino acid sequence
+            sequence: Amino acid sequence (can include modifications in parentheses, e.g., "M(ox)PEPTIDE")
             precursor_mz: Precursor m/z value
             charge: Charge state
             max_intensity: Maximum intensity for denormalization
@@ -69,13 +74,26 @@ class SpectrumPredictor:
                 - intensity: Array of intensity values
                 - confidence: Array of confidence scores
         """
-        # Tokenize sequence
+        # Parse modifications
+        parsed = self.mod_parser.parse(sequence)
+        clean_sequence = parsed['clean_sequence']
+        modifications = parsed['modifications']
+        
+        # Tokenize clean sequence
         tokens = self.tokenizer.encode(
-            sequence,
+            clean_sequence,
             max_length=self.model.max_length,
             padding=True
         )
         tokens_tensor = torch.LongTensor([tokens]).to(self.device)
+        
+        # Tokenize modifications
+        mod_tokens = self.mod_tokenizer.encode_modifications(
+            modifications,
+            max_length=self.model.max_length,
+            padding=True
+        )
+        mod_tokens_tensor = torch.LongTensor([mod_tokens]).to(self.device)
         
         # Create mask
         mask = tokens_tensor != self.tokenizer.pad_idx
@@ -87,6 +105,7 @@ class SpectrumPredictor:
         # Predict
         pred_mz, pred_intensity, pred_confidence = self.model(
             tokens_tensor,
+            mod_tokens_tensor,
             mask,
             norm_precursor_mz,
             charge_tensor
@@ -124,7 +143,7 @@ class SpectrumPredictor:
         Predict spectra for a batch of peptide sequences.
         
         Args:
-            sequences: List of amino acid sequences
+            sequences: List of amino acid sequences (can include modifications)
             precursor_mz_list: List of precursor m/z values
             charge_list: List of charge states
             max_intensity_list: List of max intensities for denormalization
@@ -137,12 +156,22 @@ class SpectrumPredictor:
         
         batch_size = len(sequences)
         
-        # Tokenize sequences
-        tokens_list = [
-            self.tokenizer.encode(seq, max_length=self.model.max_length, padding=True)
-            for seq in sequences
-        ]
+        # Parse modifications and tokenize sequences
+        tokens_list = []
+        mod_tokens_list = []
+        for seq in sequences:
+            parsed = self.mod_parser.parse(seq)
+            clean_sequence = parsed['clean_sequence']
+            modifications = parsed['modifications']
+            
+            tokens = self.tokenizer.encode(clean_sequence, max_length=self.model.max_length, padding=True)
+            mod_tokens = self.mod_tokenizer.encode_modifications(modifications, max_length=self.model.max_length, padding=True)
+            
+            tokens_list.append(tokens)
+            mod_tokens_list.append(mod_tokens)
+        
         tokens_tensor = torch.LongTensor(tokens_list).to(self.device)
+        mod_tokens_tensor = torch.LongTensor(mod_tokens_list).to(self.device)
         
         # Create masks
         mask = tokens_tensor != self.tokenizer.pad_idx
@@ -158,6 +187,7 @@ class SpectrumPredictor:
         # Predict
         pred_mz, pred_intensity, pred_confidence = self.model(
             tokens_tensor,
+            mod_tokens_tensor,
             mask,
             norm_precursor_mz,
             charge_tensor
@@ -290,8 +320,10 @@ def load_model_for_inference(
     config = checkpoint['config']
     
     # Create model
+    mod_vocab_size = getattr(config.model, 'mod_vocab_size', 3)  # Default to 3 for backward compatibility
     model = MSPredictor(
         vocab_size=config.model.vocab_size,
+        mod_vocab_size=mod_vocab_size,
         hidden_dim=config.model.hidden_dim,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,

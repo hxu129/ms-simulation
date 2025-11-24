@@ -34,7 +34,7 @@ sys.path.insert(0, '/root/ms/src')
 
 from ms_predictor.model.ms_predictor import MSPredictor, count_parameters
 from ms_predictor.data.parquet_dataset import ParquetMSDataset, create_parquet_dataloaders, collate_fn
-from ms_predictor.data.tokenizer import AminoAcidTokenizer
+from ms_predictor.data.tokenizer import AminoAcidTokenizer, ModificationTokenizer
 from ms_predictor.data.preprocessing import SpectrumPreprocessor
 from ms_predictor.training.config import Config
 from ms_predictor.training.trainer import Trainer
@@ -115,11 +115,20 @@ def create_dataloaders(cfg: DictConfig):
         cfg: Hydra DictConfig object
         
     Returns:
-        Tuple of (train_loader, val_loader)
+        Tuple of (train_loader, val_loader, mod_tokenizer)
     """
     logger = logging.getLogger(__name__)
     
     tokenizer = AminoAcidTokenizer()
+    
+    # Modification vocabulary determined from full dataset scan (see scripts/build_modification_vocab.py)
+    # Scanned 19,484,672 sequences across entire dataset - found only 1 modification: 'ox'
+    # Vocabulary: <NO_MOD> (idx=0), <UNK_MOD> (idx=1), ox (idx=2)
+    modifications = ['ox']
+    mod_tokenizer = ModificationTokenizer(modifications)
+    logger.info(f"Modification vocabulary: {modifications}")
+    logger.info(f"Modification vocab size: {mod_tokenizer.vocab_size}")
+    
     preprocessor = SpectrumPreprocessor(
         max_mz=cfg.data.max_mz,
         top_k=cfg.data.top_k,
@@ -136,6 +145,7 @@ def create_dataloaders(cfg: DictConfig):
         batch_size=cfg.data.batch_size,
         num_workers=cfg.data.num_workers,
         tokenizer=tokenizer,
+        mod_tokenizer=mod_tokenizer,
         preprocessor=preprocessor,
         max_length=cfg.model.max_length,
         max_mz=cfg.data.max_mz,
@@ -145,7 +155,7 @@ def create_dataloaders(cfg: DictConfig):
         max_files=cfg.data.get('max_files', None)
     )
     
-    return train_loader, val_loader
+    return train_loader, val_loader, mod_tokenizer
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
@@ -183,14 +193,18 @@ def main(cfg: DictConfig):
     
     # Create dataloaders
     logger.info("\nCreating dataloaders...")
-    train_loader, val_loader = create_dataloaders(cfg)
+    train_loader, val_loader, mod_tokenizer = create_dataloaders(cfg)
     logger.info(f"Training samples: {len(train_loader.dataset)}")
     logger.info(f"Validation samples: {len(val_loader.dataset)}")
     
     # Create model
     logger.info("\nCreating model...")
+    # Get modification vocabulary size from the tokenizer (ensures consistency)
+    mod_vocab_size = mod_tokenizer.vocab_size
+    logger.info(f"Model modification vocab size: {mod_vocab_size}")
     model = MSPredictor(
         vocab_size=cfg.model.vocab_size,
+        mod_vocab_size=mod_vocab_size,
         hidden_dim=cfg.model.hidden_dim,
         num_encoder_layers=cfg.model.num_encoder_layers,
         num_decoder_layers=cfg.model.num_decoder_layers,

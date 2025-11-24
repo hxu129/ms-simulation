@@ -27,6 +27,7 @@ class MSPredictor(nn.Module):
     def __init__(
         self,
         vocab_size: int,
+        mod_vocab_size: int = 3,
         hidden_dim: int = 512,
         num_encoder_layers: int = 6,
         num_decoder_layers: int = 6,
@@ -43,6 +44,7 @@ class MSPredictor(nn.Module):
         
         Args:
             vocab_size: Size of amino acid vocabulary
+            mod_vocab_size: Size of modification vocabulary
             hidden_dim: Dimension of hidden representations
             num_encoder_layers: Number of encoder layers
             num_decoder_layers: Number of decoder layers
@@ -57,17 +59,20 @@ class MSPredictor(nn.Module):
         super().__init__()
         
         self.vocab_size = vocab_size
+        self.mod_vocab_size = mod_vocab_size
         self.hidden_dim = hidden_dim
         self.num_predictions = num_predictions
         self.max_length = max_length
         
-        # Input embedding (combines peptide tokens and metadata)
+        # Input embedding (combines peptide tokens, modifications, and metadata)
         self.input_embedding = InputEmbedding(
             vocab_size=vocab_size,
             hidden_dim=hidden_dim,
             max_length=max_length,
+            mod_vocab_size=mod_vocab_size,
             max_charge=max_charge,
             padding_idx=0,
+            no_mod_idx=0,
             dropout=dropout
         )
         
@@ -116,6 +121,7 @@ class MSPredictor(nn.Module):
     def forward(
         self,
         sequence_tokens: torch.Tensor,
+        modification_tokens: torch.Tensor,
         sequence_mask: torch.Tensor,
         precursor_mz: torch.Tensor,
         charge: torch.Tensor
@@ -125,6 +131,7 @@ class MSPredictor(nn.Module):
         
         Args:
             sequence_tokens: Tokenized peptide sequences, shape (batch_size, seq_len)
+            modification_tokens: Tokenized modifications, shape (batch_size, seq_len)
             sequence_mask: Attention mask for sequences, shape (batch_size, seq_len)
                           True for real tokens, False for padding
             precursor_mz: Normalized precursor m/z values, shape (batch_size,)
@@ -138,8 +145,8 @@ class MSPredictor(nn.Module):
         """
         batch_size = sequence_tokens.size(0)
         
-        # 1. Embed input (peptide + metadata)
-        embedded = self.input_embedding(sequence_tokens, precursor_mz, charge)
+        # 1. Embed input (peptide + modifications + metadata)
+        embedded = self.input_embedding(sequence_tokens, modification_tokens, precursor_mz, charge)
         # embedded shape: (batch_size, 2 + seq_len, hidden_dim)
         
         # Create padding mask for encoder
@@ -173,6 +180,7 @@ class MSPredictor(nn.Module):
     def predict(
         self,
         sequence_tokens: torch.Tensor,
+        modification_tokens: torch.Tensor,
         sequence_mask: torch.Tensor,
         precursor_mz: torch.Tensor,
         charge: torch.Tensor,
@@ -184,6 +192,7 @@ class MSPredictor(nn.Module):
         
         Args:
             sequence_tokens: Tokenized peptide sequences
+            modification_tokens: Tokenized modifications
             sequence_mask: Attention mask for sequences
             precursor_mz: Normalized precursor m/z values
             charge: Charge states
@@ -195,7 +204,7 @@ class MSPredictor(nn.Module):
         """
         # Get predictions
         mz_pred, intensity_pred, confidence_pred = self.forward(
-            sequence_tokens, sequence_mask, precursor_mz, charge
+            sequence_tokens, modification_tokens, sequence_mask, precursor_mz, charge
         )
         
         # Denormalize m/z
