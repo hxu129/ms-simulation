@@ -8,8 +8,9 @@ import os
 import torch
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from torch.utils.data import Dataset
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import json
 from pathlib import Path
 
@@ -51,7 +52,7 @@ class ParquetMSDataset(Dataset):
     
     def __init__(
         self,
-        data_dir: str,
+        data_dir: str = None,
         metadata_file: Optional[str] = None,
         tokenizer: Optional[AminoAcidTokenizer] = None,
         preprocessor: Optional[SpectrumPreprocessor] = None,
@@ -63,7 +64,9 @@ class ParquetMSDataset(Dataset):
         max_files: Optional[int] = None,
         max_mz: float = 2000.0,
         top_k: int = 200,
-        num_predictions: int = 100
+        num_predictions: int = 100,
+        shared_spectra_info: Optional[Tuple] = None,
+        parquet_files: Optional[List[str]] = None
     ):
         """
         Initialize Parquet dataset.
@@ -82,6 +85,8 @@ class ParquetMSDataset(Dataset):
             max_mz: Maximum m/z value for normalization
             top_k: Number of top peaks to extract from spectrum
             num_predictions: Number of predictions the model will make (N)
+            shared_spectra_info: Optional pre-loaded spectra info (file_indices, row_indices, file_paths)
+            parquet_files: Optional pre-loaded list of parquet file paths
         """
         self.data_dir = data_dir
         self.tokenizer = tokenizer or AminoAcidTokenizer()
@@ -99,26 +104,37 @@ class ParquetMSDataset(Dataset):
         # to avoid re-reading files for every sample. The flag only controls initial caching.
         self.df_cache = {}
         
-        # Load file list
-        if metadata_file and os.path.exists(metadata_file):
-            self.parquet_files = self._load_from_metadata(metadata_file)
+        # Use shared spectra info if provided (for train/val/test split efficiency)
+        if shared_spectra_info is not None:
+            file_indices, row_indices, self.parquet_files = shared_spectra_info
+            self.file_indices = file_indices
+            self.row_indices = row_indices
+            total_spectra = len(file_indices)
+            print(f"Using shared spectra info: {total_spectra} total spectra")
         else:
-            self.parquet_files = self._discover_parquet_files(data_dir)
-        
-        # Limit number of files if specified
-        if max_files:
-            self.parquet_files = self.parquet_files[:max_files]
-        
-        print(f"Found {len(self.parquet_files)} Parquet files")
-        
-        # Load all spectra information
-        print(f"Loading spectra info for {split} split...")
-        self.spectra_info = self._load_spectra_info()
-        
-        print(f"Total spectra: {len(self.spectra_info)}")
+            # Load file list
+            if parquet_files is not None:
+                self.parquet_files = parquet_files
+            elif metadata_file and os.path.exists(metadata_file):
+                self.parquet_files = self._load_from_metadata(metadata_file)
+            else:
+                self.parquet_files = self._discover_parquet_files(data_dir)
+            
+            # Limit number of files if specified
+            if max_files:
+                self.parquet_files = self.parquet_files[:max_files]
+            
+            print(f"Found {len(self.parquet_files)} Parquet files")
+            
+            # Load all spectra information using optimized method
+            print(f"Loading spectra info (reading only metadata, not full files)...")
+            self.file_indices, self.row_indices = self._load_spectra_info()
+            
+            total_spectra = len(self.file_indices)
+            print(f"Total spectra: {total_spectra}")
         
         # Split dataset
-        print(f"Splitting dataset (this may take a moment)...")
+        print(f"Splitting dataset for {split} split...")
         self.indices = self._split_dataset(val_split, test_split)
         
         print(f"{split.capitalize()} split: {len(self.indices)} spectra")
@@ -141,66 +157,74 @@ class ParquetMSDataset(Dataset):
         
         return sorted(parquet_files)
     
-    def _load_spectra_info(self) -> List[Dict]:
+    def _load_spectra_info(self) -> Tuple[np.ndarray, np.ndarray]:
         """
         Load information about all spectra from Parquet files.
         
-        OPTIMIZED: Only reads metadata to get row count, not full data.
+        HIGHLY OPTIMIZED: Uses PyArrow to read only metadata (not data).
+        Returns compact numpy arrays instead of list of dicts.
         
         Returns:
-            List of dictionaries containing file_idx and row_idx
+            Tuple of (file_indices, row_indices) as numpy int32 arrays
         """
         import time
-        spectra_info = []
+        
+        # Pre-allocate lists (will convert to numpy at end)
+        file_indices_list = []
+        row_indices_list = []
+        
+        print(f"  Scanning {len(self.parquet_files)} parquet files (metadata only)...")
+        total_start = time.time()
         
         for file_idx, parquet_path in enumerate(self.parquet_files):
             try:
-                print(f"  Reading parquet file {file_idx+1}/{len(self.parquet_files)}...")
                 start = time.time()
                 
-                # OPTIMIZED: Read only metadata to get row count (much faster!)
-                parquet_file = pd.read_parquet(parquet_path)
-                num_spectra = len(parquet_file)
-                print(f"    Loaded {num_spectra} rows in {time.time()-start:.2f}s")
+                # HIGHLY OPTIMIZED: Use PyArrow to read ONLY metadata (not data)
+                # This is 100-1000x faster than pd.read_parquet()!
+                pq_file = pq.ParquetFile(parquet_path)
+                num_spectra = pq_file.metadata.num_rows
                 
-                # Pre-allocate the list for this file (faster than append)
-                print(f"    Creating spectra info list...")
-                start = time.time()
-                file_spectra_info = [
-                    {
-                        'file_idx': file_idx,
-                        'row_idx': row_idx,
-                        'file_path': parquet_path
-                    }
-                    for row_idx in range(num_spectra)
-                ]
-                spectra_info.extend(file_spectra_info)
-                print(f"    Created info list in {time.time()-start:.2f}s")
+                elapsed = time.time() - start
+                print(f"  [{file_idx+1}/{len(self.parquet_files)}] {os.path.basename(parquet_path)}: {num_spectra} spectra ({elapsed:.3f}s)")
                 
-                # Cache DataFrame if requested during initialization
+                # Create arrays for this file (much faster than list comprehension)
+                file_indices_list.append(np.full(num_spectra, file_idx, dtype=np.int32))
+                row_indices_list.append(np.arange(num_spectra, dtype=np.int32))
+                
+                # Optionally pre-cache DataFrame if requested
                 if self.cache_dataframes:
-                    self.df_cache[file_idx] = parquet_file
-                    print(f"    Pre-cached {num_spectra} spectra in memory")
-                else:
-                    # Don't pre-cache, but will cache on first access
-                    del parquet_file
-                    print(f"    Will cache on first access (lazy caching)")
+                    df = pd.read_parquet(parquet_path)
+                    self.df_cache[file_idx] = df
+                    print(f"    Pre-cached DataFrame in memory")
                 
             except Exception as e:
-                print(f"Warning: Could not load {parquet_path}: {e}")
+                print(f"Warning: Could not load metadata from {parquet_path}: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
         
-        print(f"  Total spectra info entries: {len(spectra_info)}")
-        return spectra_info
+        # Concatenate all arrays (single operation, very fast)
+        file_indices = np.concatenate(file_indices_list) if file_indices_list else np.array([], dtype=np.int32)
+        row_indices = np.concatenate(row_indices_list) if row_indices_list else np.array([], dtype=np.int32)
+        
+        total_time = time.time() - total_start
+        print(f"  Loaded metadata for {len(file_indices)} total spectra in {total_time:.2f}s")
+        print(f"  Memory usage: ~{(file_indices.nbytes + row_indices.nbytes) / 1024 / 1024:.1f} MB")
+        
+        return file_indices, row_indices
     
-    def _split_dataset(self, val_split: float, test_split: float) -> List[int]:
-        """Split dataset into train/val/test."""
-        total = len(self.spectra_info)
+    def _split_dataset(self, val_split: float, test_split: float) -> np.ndarray:
+        """
+        Split dataset into train/val/test.
+        
+        Returns:
+            Numpy array of indices for this split
+        """
+        total = len(self.file_indices)
         
         # Create indices
-        indices = np.arange(total)
+        indices = np.arange(total, dtype=np.int32)
         np.random.seed(42)  # For reproducibility
         np.random.shuffle(indices)
         
@@ -210,13 +234,13 @@ class ParquetMSDataset(Dataset):
         train_size = total - val_size - test_size
         
         if self.split == 'train':
-            return indices[:train_size].tolist()
+            return indices[:train_size]
         elif self.split == 'val':
-            return indices[train_size:train_size + val_size].tolist()
+            return indices[train_size:train_size + val_size]
         elif self.split == 'test':
-            return indices[train_size + val_size:].tolist()
+            return indices[train_size + val_size:]
         else:
-            return indices.tolist()
+            return indices
     
     def _load_spectrum(self, idx: int) -> Dict:
         """
@@ -228,13 +252,11 @@ class ParquetMSDataset(Dataset):
         Returns:
             Dictionary with spectrum data
         """
-        # Get spectrum info
+        # Get spectrum info from numpy arrays (very fast!)
         global_idx = self.indices[idx]
-        info = self.spectra_info[global_idx]
-        
-        file_idx = info['file_idx']
-        row_idx = info['row_idx']
-        file_path = info['file_path']
+        file_idx = int(self.file_indices[global_idx])
+        row_idx = int(self.row_indices[global_idx])
+        file_path = self.parquet_files[file_idx]
         
         # Load DataFrame (from cache or disk)
         # CRITICAL: Always cache dataframes even if cache_dataframes=False in __init__
@@ -364,10 +386,15 @@ def create_parquet_dataloaders(
     top_k: int = 200,
     num_predictions: int = 100,
     max_length: int = 50,
+    tokenizer: Optional[AminoAcidTokenizer] = None,
+    preprocessor: Optional[SpectrumPreprocessor] = None,
     **kwargs
 ):
     """
     Create train/val/test dataloaders from Parquet data.
+    
+    OPTIMIZED: Loads spectra info only ONCE and shares it across train/val/test datasets.
+    This avoids reading file metadata 3 times, saving significant time and memory.
     
     Args:
         data_dir: Directory containing Parquet files
@@ -378,31 +405,108 @@ def create_parquet_dataloaders(
         top_k: Number of top peaks to extract from spectrum
         num_predictions: Number of predictions the model will make
         max_length: Maximum sequence length
-        **kwargs: Additional arguments for ParquetMSDataset
+        tokenizer: Optional shared tokenizer
+        preprocessor: Optional shared preprocessor
+        **kwargs: Additional arguments for ParquetMSDataset (e.g., cache_dataframes, max_files)
         
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
     """
     from torch.utils.data import DataLoader
+    import time
     
-    # Create datasets
+    print("\n" + "="*80)
+    print("CREATING DATALOADERS (OPTIMIZED)")
+    print("="*80)
+    
+    start_time = time.time()
+    
+    # Step 1: Load file list once
+    print("\nStep 1: Discovering Parquet files...")
+    temp_dataset = ParquetMSDataset(
+        data_dir=data_dir,
+        metadata_file=metadata_file,
+        max_mz=max_mz,
+        top_k=top_k,
+        num_predictions=num_predictions,
+        max_length=max_length,
+        tokenizer=tokenizer,
+        preprocessor=preprocessor,
+        **kwargs
+    )
+    
+    # Extract the loaded info
+    parquet_files = temp_dataset.parquet_files
+    file_indices = temp_dataset.file_indices
+    row_indices = temp_dataset.row_indices
+    
+    # Create shared spectra info tuple
+    shared_spectra_info = (file_indices, row_indices, parquet_files)
+    
+    print(f"\nStep 2: Creating train/val/test splits (sharing spectra info)...")
+    
+    # Get splits info from kwargs
+    val_split = kwargs.pop('val_split', 0.1)
+    test_split = kwargs.pop('test_split', 0.1)
+    cache_dataframes = kwargs.pop('cache_dataframes', False)
+    
+    # Create datasets with shared spectra info (no re-reading files!)
     train_dataset = ParquetMSDataset(
-        data_dir, metadata_file, split='train',
-        max_mz=max_mz, top_k=top_k, num_predictions=num_predictions,
-        max_length=max_length, **kwargs
-    )
-    val_dataset = ParquetMSDataset(
-        data_dir, metadata_file, split='val',
-        max_mz=max_mz, top_k=top_k, num_predictions=num_predictions,
-        max_length=max_length, **kwargs
-    )
-    test_dataset = ParquetMSDataset(
-        data_dir, metadata_file, split='test',
-        max_mz=max_mz, top_k=top_k, num_predictions=num_predictions,
-        max_length=max_length, **kwargs
+        split='train',
+        val_split=val_split,
+        test_split=test_split,
+        max_mz=max_mz, 
+        top_k=top_k, 
+        num_predictions=num_predictions,
+        max_length=max_length,
+        tokenizer=tokenizer,
+        preprocessor=preprocessor,
+        cache_dataframes=cache_dataframes,
+        shared_spectra_info=shared_spectra_info,
+        **kwargs
     )
     
-    # Create dataloaders
+    val_dataset = ParquetMSDataset(
+        split='val',
+        val_split=val_split,
+        test_split=test_split,
+        max_mz=max_mz, 
+        top_k=top_k, 
+        num_predictions=num_predictions,
+        max_length=max_length,
+        tokenizer=tokenizer,
+        preprocessor=preprocessor,
+        cache_dataframes=cache_dataframes,
+        shared_spectra_info=shared_spectra_info,
+        **kwargs
+    )
+    
+    test_dataset = ParquetMSDataset(
+        split='test',
+        val_split=val_split,
+        test_split=test_split,
+        max_mz=max_mz, 
+        top_k=top_k, 
+        num_predictions=num_predictions,
+        max_length=max_length,
+        tokenizer=tokenizer,
+        preprocessor=preprocessor,
+        cache_dataframes=cache_dataframes,
+        shared_spectra_info=shared_spectra_info,
+        **kwargs
+    )
+    
+    print(f"\nDataset sizes:")
+    print(f"  Train: {len(train_dataset)} samples")
+    print(f"  Val:   {len(val_dataset)} samples")
+    print(f"  Test:  {len(test_dataset)} samples")
+    
+    # Step 3: Create dataloaders
+    print(f"\nStep 3: Creating DataLoaders...")
+    
+    # Adjust num_workers based on whether persistent_workers should be used
+    use_persistent = num_workers > 0
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -410,7 +514,7 @@ def create_parquet_dataloaders(
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=True, 
-        persistent_workers=True
+        persistent_workers=use_persistent
     )
     
     val_loader = DataLoader(
@@ -420,7 +524,7 @@ def create_parquet_dataloaders(
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=use_persistent
     )
     
     test_loader = DataLoader(
@@ -430,8 +534,12 @@ def create_parquet_dataloaders(
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=use_persistent
     )
+    
+    elapsed_time = time.time() - start_time
+    print(f"\n✓ DataLoaders created in {elapsed_time:.2f}s")
+    print("="*80 + "\n")
     
     return train_loader, val_loader, test_loader
 
