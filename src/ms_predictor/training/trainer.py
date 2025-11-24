@@ -11,6 +11,7 @@ from torch.cuda.amp import GradScaler, autocast
 from typing import Dict, Optional
 from tqdm import tqdm
 import numpy as np
+from omegaconf import DictConfig, OmegaConf
 
 from .config import Config
 from ..model.ms_predictor import MSPredictor
@@ -36,7 +37,8 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: Optional[DataLoader],
         config: Config,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        raw_config: Optional[DictConfig] = None
     ):
         """
         Initialize trainer.
@@ -47,11 +49,13 @@ class Trainer:
             val_loader: Validation data loader
             config: Configuration
             device: Device to use (defaults to config.training.device)
+            raw_config: Optional raw Hydra DictConfig for complete wandb logging
         """
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.config = config
+        self.raw_config = raw_config
         
         # Set up logger
         self.logger = logging.getLogger(__name__)
@@ -116,44 +120,54 @@ class Trainer:
         num_trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         
         # Prepare config dict for wandb
-        wandb_config = {
-            'experiment_name': self.config.experiment_name,
-            'model': {
-                'vocab_size': self.config.model.vocab_size,
-                'hidden_dim': self.config.model.hidden_dim,
-                'num_encoder_layers': self.config.model.num_encoder_layers,
-                'num_decoder_layers': self.config.model.num_decoder_layers,
-                'num_heads': self.config.model.num_heads,
-                'dim_feedforward': self.config.model.dim_feedforward,
-                'num_predictions': self.config.model.num_predictions,
-                'max_length': self.config.model.max_length,
-                'max_charge': self.config.model.max_charge,
-                'dropout': self.config.model.dropout,
-                'activation': self.config.model.activation,
-                'num_parameters': num_params,
-                'num_trainable_parameters': num_trainable,
-            },
-            'optimizer': {
-                'optimizer': self.config.optimizer.optimizer,
-                'learning_rate': self.config.optimizer.learning_rate,
-                'weight_decay': self.config.optimizer.weight_decay,
-                'scheduler': self.config.optimizer.scheduler,
-            },
-            'loss': {
-                'loss_mz_weight': self.config.loss.loss_mz_weight,
-                'loss_intensity_weight': self.config.loss.loss_intensity_weight,
-                'loss_confidence_weight': self.config.loss.loss_confidence_weight,
-                'background_confidence_weight': self.config.loss.background_confidence_weight,
-                'use_cosine_loss': self.config.loss.use_cosine_loss,
-                'cosine_loss_weight': self.config.loss.cosine_loss_weight,
-            },
-            'training': {
-                'num_epochs': self.config.training.num_epochs,
-                'batch_size': self.config.data.batch_size,
-                'gradient_clip': self.config.training.gradient_clip,
-                'mixed_precision': self.config.training.mixed_precision,
+        if self.raw_config is not None:
+            # Use complete runtime configuration from Hydra
+            wandb_config = OmegaConf.to_container(self.raw_config, resolve=True)
+            # Add model parameter counts
+            if 'model' not in wandb_config:
+                wandb_config['model'] = {}
+            wandb_config['model']['num_parameters'] = num_params
+            wandb_config['model']['num_trainable_parameters'] = num_trainable
+        else:
+            # Fallback to manual config selection (for backward compatibility)
+            wandb_config = {
+                'experiment_name': self.config.experiment_name,
+                'model': {
+                    'vocab_size': self.config.model.vocab_size,
+                    'hidden_dim': self.config.model.hidden_dim,
+                    'num_encoder_layers': self.config.model.num_encoder_layers,
+                    'num_decoder_layers': self.config.model.num_decoder_layers,
+                    'num_heads': self.config.model.num_heads,
+                    'dim_feedforward': self.config.model.dim_feedforward,
+                    'num_predictions': self.config.model.num_predictions,
+                    'max_length': self.config.model.max_length,
+                    'max_charge': self.config.model.max_charge,
+                    'dropout': self.config.model.dropout,
+                    'activation': self.config.model.activation,
+                    'num_parameters': num_params,
+                    'num_trainable_parameters': num_trainable,
+                },
+                'optimizer': {
+                    'optimizer': self.config.optimizer.optimizer,
+                    'learning_rate': self.config.optimizer.learning_rate,
+                    'weight_decay': self.config.optimizer.weight_decay,
+                    'scheduler': self.config.optimizer.scheduler,
+                },
+                'loss': {
+                    'loss_mz_weight': self.config.loss.loss_mz_weight,
+                    'loss_intensity_weight': self.config.loss.loss_intensity_weight,
+                    'loss_confidence_weight': self.config.loss.loss_confidence_weight,
+                    'background_confidence_weight': self.config.loss.background_confidence_weight,
+                    'use_cosine_loss': self.config.loss.use_cosine_loss,
+                    'cosine_loss_weight': self.config.loss.cosine_loss_weight,
+                },
+                'training': {
+                    'num_epochs': self.config.training.num_epochs,
+                    'batch_size': self.config.data.batch_size,
+                    'gradient_clip': self.config.training.gradient_clip,
+                    'mixed_precision': self.config.training.mixed_precision,
+                }
             }
-        }
         
         wandb.init(
             project=self.config.wandb.project,
