@@ -40,10 +40,7 @@ class DataConfig:
     num_workers: int = 4
     max_mz: float = 2000.0
     top_k: int = 200
-    use_dummy_data: bool = True  # Use dummy data if no real data available
-    dummy_train_samples: int = 1000
-    dummy_val_samples: int = 200
-    use_parquet: bool = False  # Use Parquet format for data
+    use_parquet: bool = True  # Use Parquet format for data
     cache_dataframes: bool = False  # Cache dataframes in memory
     max_files: Optional[int] = None  # Maximum number of parquet files to load
     metadata_file: Optional[str] = None  # Path to metadata file
