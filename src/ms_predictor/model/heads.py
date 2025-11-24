@@ -39,7 +39,7 @@ class PredictionHeads(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(intermediate_dim, 1),
-            nn.Softplus()  # Output in [0, 1]
+            nn.Softplus()  
         )
         
         # Intensity head
@@ -48,7 +48,7 @@ class PredictionHeads(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(intermediate_dim, 1),
-            nn.Softplus()  # Output in [0, 1]
+            nn.Softplus()  
         )
         
         # Confidence head (probability that this is a real peak)
