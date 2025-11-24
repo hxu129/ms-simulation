@@ -39,7 +39,7 @@ class PredictionHeads(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(intermediate_dim, 1),
-            nn.Sigmoid()  # Output in [0, 1]
+            nn.Softplus()  # Output in [0, 1]
         )
         
         # Intensity head
@@ -48,7 +48,7 @@ class PredictionHeads(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(intermediate_dim, 1),
-            nn.Sigmoid()  # Output in [0, 1]
+            nn.Softplus()  # Output in [0, 1]
         )
         
         # Confidence head (probability that this is a real peak)
@@ -81,80 +81,80 @@ class PredictionHeads(nn.Module):
         return mz_pred, intensity_pred, confidence_pred
 
 
-class SharedBackbonePredictionHeads(nn.Module):
-    """
-    Prediction heads with a shared backbone before splitting into specific heads.
+# class SharedBackbonePredictionHeads(nn.Module):
+#     """
+#     Prediction heads with a shared backbone before splitting into specific heads.
     
-    This can help with learning shared representations before specializing.
-    """
+#     This can help with learning shared representations before specializing.
+#     """
     
-    def __init__(
-        self,
-        hidden_dim: int,
-        shared_dim: int,
-        dropout: float = 0.1
-    ):
-        """
-        Initialize prediction heads with shared backbone.
+#     def __init__(
+#         self,
+#         hidden_dim: int,
+#         shared_dim: int,
+#         dropout: float = 0.1
+#     ):
+#         """
+#         Initialize prediction heads with shared backbone.
         
-        Args:
-            hidden_dim: Dimension of decoder output
-            shared_dim: Dimension of shared representation
-            dropout: Dropout rate
-        """
-        super().__init__()
+#         Args:
+#             hidden_dim: Dimension of decoder output
+#             shared_dim: Dimension of shared representation
+#             dropout: Dropout rate
+#         """
+#         super().__init__()
         
-        # Shared backbone
-        self.shared_backbone = nn.Sequential(
-            nn.Linear(hidden_dim, shared_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-        )
+#         # Shared backbone
+#         self.shared_backbone = nn.Sequential(
+#             nn.Linear(hidden_dim, shared_dim),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#         )
         
-        # Position head
-        self.position_head = nn.Sequential(
-            nn.Linear(shared_dim, shared_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(shared_dim // 2, 1),
-            nn.Sigmoid()
-        )
+#         # Position head
+#         self.position_head = nn.Sequential(
+#             nn.Linear(shared_dim, shared_dim // 2),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(shared_dim // 2, 1),
+#             nn.Sigmoid()
+#         )
         
-        # Intensity head
-        self.intensity_head = nn.Sequential(
-            nn.Linear(shared_dim, shared_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(shared_dim // 2, 1),
-            nn.Sigmoid()
-        )
+#         # Intensity head
+#         self.intensity_head = nn.Sequential(
+#             nn.Linear(shared_dim, shared_dim // 2),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(shared_dim // 2, 1),
+#             nn.Sigmoid()
+#         )
         
-        # Confidence head
-        self.confidence_head = nn.Sequential(
-            nn.Linear(shared_dim, shared_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(shared_dim // 2, 1),
-            nn.Sigmoid()
-        )
+#         # Confidence head
+#         self.confidence_head = nn.Sequential(
+#             nn.Linear(shared_dim, shared_dim // 2),
+#             nn.ReLU(),
+#             nn.Dropout(dropout),
+#             nn.Linear(shared_dim // 2, 1),
+#             nn.Sigmoid()
+#         )
     
-    def forward(self, decoder_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Forward pass through shared backbone and prediction heads.
+#     def forward(self, decoder_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+#         """
+#         Forward pass through shared backbone and prediction heads.
         
-        Args:
-            decoder_output: Decoder output, shape (batch_size, num_queries, hidden_dim)
+#         Args:
+#             decoder_output: Decoder output, shape (batch_size, num_queries, hidden_dim)
             
-        Returns:
-            Tuple of (mz_pred, intensity_pred, confidence_pred)
-        """
-        # Pass through shared backbone
-        shared_repr = self.shared_backbone(decoder_output)
+#         Returns:
+#             Tuple of (mz_pred, intensity_pred, confidence_pred)
+#         """
+#         # Pass through shared backbone
+#         shared_repr = self.shared_backbone(decoder_output)
         
-        # Pass through each head
-        mz_pred = self.position_head(shared_repr).squeeze(-1)
-        intensity_pred = self.intensity_head(shared_repr).squeeze(-1)
-        confidence_pred = self.confidence_head(shared_repr).squeeze(-1)
+#         # Pass through each head
+#         mz_pred = self.position_head(shared_repr).squeeze(-1)
+#         intensity_pred = self.intensity_head(shared_repr).squeeze(-1)
+#         confidence_pred = self.confidence_head(shared_repr).squeeze(-1)
         
-        return mz_pred, intensity_pred, confidence_pred
+#         return mz_pred, intensity_pred, confidence_pred
 
