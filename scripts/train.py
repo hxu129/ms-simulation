@@ -223,7 +223,8 @@ def main(cfg: DictConfig):
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        config=config
+        config=config,
+        raw_config=cfg  # Pass raw Hydra config for complete wandb logging
     )
     
     # DEBUG: Verify trainer device and model location
