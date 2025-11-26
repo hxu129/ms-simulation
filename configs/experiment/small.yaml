@@ -9,14 +9,13 @@ model:
   num_decoder_layers: 3
   num_heads: 4
   dim_feedforward: 1024
+  num_predictions: 50
 
 data:
-  batch_size: 32  # Moderate batch size
-  num_workers: 0  # Use 0 to avoid worker process OOM
-  max_files: 1   # CRITICAL: Limit files to avoid OOM (10 files ≈ 2GB when cached)
+  batch_size: 64
 
 training:
-  num_epochs: 100
+  num_epochs: 50
   save_interval: 10
 
 
