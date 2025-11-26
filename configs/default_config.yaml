@@ -4,7 +4,7 @@ experiment_name: ms_predictor_default
 seed: 42
 
 model:
-  vocab_size: 22  # 20 amino acids + PAD + UNK
+  vocab_size: 30  # 20 standard AAs + 4 modified AAs + 4 N-terminal mods + PAD + UNK
   hidden_dim: 512
   num_encoder_layers: 6
   num_decoder_layers: 6
@@ -22,7 +22,7 @@ data:
   test_data_path: null   # Set to your test data path
   batch_size: 32
   num_workers: 4
-  max_mz: 2000.0
+  max_mz: 1500.0
   top_k: 20
   use_parquet: true  # Use Parquet format (recommended)
   cache_dataframes: false  # Cache entire Parquet files in memory

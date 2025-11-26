@@ -9,13 +9,26 @@ class AminoAcidTokenizer:
     """
     Tokenizer for converting amino acid sequences to integer indices.
     
-    Supports 20 standard amino acids plus special tokens for padding and unknown residues.
+    Supports 20 standard amino acids, modified amino acids, N-terminal modifications,
+    plus special tokens for padding and unknown residues.
     """
     
-    # 20 standard amino acids
-    AMINO_ACIDS = [
-        'A', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L',
-        'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W', 'Y'
+    # All residue types including standard amino acids and modifications
+    # Order matters: N-terminal modifications first, then modified AAs, then standard AAs
+    RESIDUES = [
+        # N-terminal modifications (4)
+        '(acetyl)',
+        '(carbamyl)',
+        '(-nh3)',
+        '(carbamyl)(-nh3)',
+        # Modified amino acids (4)
+        'C(carbamidomethyl)',
+        'M(ox)',
+        'N(deamide)',
+        'Q(deamide)',
+        # Standard amino acids (20)
+        'G', 'A', 'S', 'P', 'V', 'T', 'C', 'L', 'I', 'N',
+        'D', 'Q', 'K', 'E', 'M', 'H', 'F', 'R', 'Y', 'W'
     ]
     
     def __init__(self, pad_token: str = '<PAD>', unk_token: str = '<UNK>'):
@@ -35,9 +48,9 @@ class AminoAcidTokenizer:
             unk_token: 1,
         }
         
-        # Add amino acids to vocabulary
-        for i, aa in enumerate(self.AMINO_ACIDS, start=2):
-            self.vocab[aa] = i
+        # Add all residues to vocabulary (including modified amino acids and N-terminal modifications)
+        for i, residue in enumerate(self.RESIDUES, start=2):
+            self.vocab[residue] = i
         
         # Reverse mapping
         self.idx_to_token = {idx: token for token, idx in self.vocab.items()}
@@ -59,16 +72,39 @@ class AminoAcidTokenizer:
         """
         Convert amino acid sequence to token indices.
         
+        Handles modified amino acids (e.g., M(ox), C(carbamidomethyl)) and 
+        N-terminal modifications (e.g., (acetyl), (carbamyl)).
+        
         Args:
-            sequence: Amino acid sequence string
+            sequence: Amino acid sequence string (e.g., "(acetyl)M(ox)PEPTIDE")
             max_length: Maximum sequence length (pads or truncates if specified)
             padding: Whether to pad the sequence to max_length
             
         Returns:
             List of token indices
         """
-        # Convert each character to its index
-        tokens = [self.vocab.get(aa.upper(), self.unk_idx) for aa in sequence]
+        tokens = []
+        i = 0
+        
+        while i < len(sequence):
+            matched = False
+            
+            # Try to match the longest valid token starting at position i
+            # Check from longest to shortest possible matches
+            for length in range(min(20, len(sequence) - i), 0, -1):
+                candidate = sequence[i:i+length]
+                
+                if candidate in self.vocab:
+                    tokens.append(self.vocab[candidate])
+                    i += length
+                    matched = True
+                    break
+            
+            if not matched:
+                # If no match found, treat as single character (possibly unknown)
+                char = sequence[i].upper()
+                tokens.append(self.vocab.get(char, self.unk_idx))
+                i += 1
         
         if max_length is not None:
             if len(tokens) > max_length:
@@ -84,19 +120,22 @@ class AminoAcidTokenizer:
         """
         Convert token indices back to amino acid sequence.
         
+        Correctly reconstructs sequences with modifications (e.g., M(ox), (acetyl)).
+        
         Args:
             indices: List of token indices
             skip_special_tokens: Whether to skip special tokens (PAD, UNK) in output
             
         Returns:
-            Amino acid sequence string
+            Amino acid sequence string with modifications preserved
         """
         sequence = []
         special_tokens = {self.pad_idx, self.unk_idx} if skip_special_tokens else set()
         
         for idx in indices:
             if idx not in special_tokens:
-                sequence.append(self.idx_to_token.get(idx, self.unk_token))
+                token = self.idx_to_token.get(idx, self.unk_token)
+                sequence.append(token)
         
         return ''.join(sequence)
     
