@@ -57,6 +57,7 @@ class LossConfig:
     
     # Loss weights
     loss_mz_weight: float = 1.0
+    loss_mz_l1_weight: float = 1.0
     loss_intensity_weight: float = 1.0
     loss_confidence_weight: float = 1.0
     background_confidence_weight: float = 0.1
@@ -65,6 +66,9 @@ class LossConfig:
     use_cosine_loss: bool = True
     cosine_loss_weight: float = 0.5  # Tunable scaler
     cosine_bin_size: float = 1.0
+
+    # Scalar contrastive loss temperature
+    temperature: float = 0.01
 
 
 @dataclass

@@ -38,53 +38,6 @@ class AminoAcidEmbedding(nn.Module):
         return self.embedding(tokens) * math.sqrt(self.hidden_dim)
 
 
-class ModificationEmbedding(nn.Module):
-    """
-    Embedding layer for amino acid modifications.
-    
-    Creates embeddings for post-translational modifications (PTMs) that can be
-    added to amino acid embeddings.
-    """
-    
-    def __init__(self, mod_vocab_size: int, hidden_dim: int, no_mod_idx: int = 0):
-        """
-        Initialize modification embedding.
-        
-        Args:
-            mod_vocab_size: Size of the modification vocabulary
-            hidden_dim: Dimension of embeddings
-            no_mod_idx: Index of "no modification" token (will use zero embedding)
-        """
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.no_mod_idx = no_mod_idx
-        
-        # Create embedding layer
-        # We use zero padding for no_mod_idx to represent unmodified positions
-        self.embedding = nn.Embedding(
-            mod_vocab_size, 
-            hidden_dim, 
-            padding_idx=no_mod_idx
-        )
-    
-    def forward(self, mod_tokens: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass.
-        
-        Args:
-            mod_tokens: Modification token indices, shape (batch_size, seq_len)
-            
-        Returns:
-            Modification embeddings, shape (batch_size, seq_len, hidden_dim)
-            Unmodified positions (no_mod_idx) will have zero embeddings
-        """
-        # Get embeddings (no_mod_idx positions will be zero due to padding_idx)
-        mod_emb = self.embedding(mod_tokens)
-        
-        # Scale by sqrt(hidden_dim) to match amino acid embedding scale
-        return mod_emb * math.sqrt(self.hidden_dim)
-
-
 class MetadataEmbedding(nn.Module):
     """
     Embedding layer for metadata (precursor m/z and charge).
@@ -245,10 +198,8 @@ class InputEmbedding(nn.Module):
         vocab_size: int,
         hidden_dim: int,
         max_length: int,
-        mod_vocab_size: int = 3,
         max_charge: int = 10,
         padding_idx: int = 0,
-        no_mod_idx: int = 0,
         dropout: float = 0.1
     ):
         """
@@ -258,23 +209,19 @@ class InputEmbedding(nn.Module):
             vocab_size: Size of amino acid vocabulary
             hidden_dim: Dimension of embeddings
             max_length: Maximum sequence length
-            mod_vocab_size: Size of modification vocabulary
             max_charge: Maximum charge state
             padding_idx: Padding token index
-            no_mod_idx: Index of "no modification" token
             dropout: Dropout rate
         """
         super().__init__()
         
         self.aa_embedding = AminoAcidEmbedding(vocab_size, hidden_dim, padding_idx)
-        self.mod_embedding = ModificationEmbedding(mod_vocab_size, hidden_dim, no_mod_idx)
         self.metadata_embedding = MetadataEmbedding(hidden_dim, max_charge)
         self.positional_encoding = PositionalEncoding(hidden_dim, max_length + 10, dropout)
     
     def forward(
         self,
         tokens: torch.Tensor,
-        mod_tokens: torch.Tensor,
         precursor_mz: torch.Tensor,
         charge: torch.Tensor
     ) -> torch.Tensor:
@@ -283,7 +230,6 @@ class InputEmbedding(nn.Module):
         
         Args:
             tokens: Token indices, shape (batch_size, seq_len)
-            mod_tokens: Modification token indices, shape (batch_size, seq_len)
             precursor_mz: Precursor m/z values, shape (batch_size,)
             charge: Charge states, shape (batch_size,)
             
@@ -294,17 +240,11 @@ class InputEmbedding(nn.Module):
         # Get amino acid embeddings
         aa_emb = self.aa_embedding(tokens)  # (batch_size, seq_len, hidden_dim)
         
-        # Get modification embeddings
-        mod_emb = self.mod_embedding(mod_tokens)  # (batch_size, seq_len, hidden_dim)
-        
-        # Combine amino acid and modification embeddings (element-wise addition)
-        combined_aa_emb = aa_emb + mod_emb  # (batch_size, seq_len, hidden_dim)
-        
         # Get metadata embeddings
         metadata_emb = self.metadata_embedding(precursor_mz, charge)  # (batch_size, 2, hidden_dim)
         
         # Concatenate metadata and sequence
-        combined_emb = torch.cat([metadata_emb, combined_aa_emb], dim=1)  # (batch_size, 2 + seq_len, hidden_dim)
+        combined_emb = torch.cat([metadata_emb, aa_emb], dim=1)  # (batch_size, 2 + seq_len, hidden_dim)
         
         # Add positional encoding
         combined_emb = self.positional_encoding(combined_emb)

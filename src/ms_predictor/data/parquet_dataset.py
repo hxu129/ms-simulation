@@ -14,9 +14,8 @@ from typing import Dict, List, Optional, Tuple
 import json
 from pathlib import Path
 
-from .tokenizer import AminoAcidTokenizer, ModificationTokenizer
+from .tokenizer import AminoAcidTokenizer
 from .preprocessing import SpectrumPreprocessor
-from .modification_parser import ModificationParser
 
 
 def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
@@ -56,7 +55,6 @@ class ParquetMSDataset(Dataset):
         data_dir: str = None,
         metadata_file: Optional[str] = None,
         tokenizer: Optional[AminoAcidTokenizer] = None,
-        mod_tokenizer: Optional[ModificationTokenizer] = None,
         preprocessor: Optional[SpectrumPreprocessor] = None,
         max_length: int = 50,
         split: str = 'train',
@@ -77,7 +75,6 @@ class ParquetMSDataset(Dataset):
             data_dir: Directory containing Parquet files
             metadata_file: Optional JSON metadata file listing all Parquet files
             tokenizer: Amino acid tokenizer
-            mod_tokenizer: Modification tokenizer
             preprocessor: Spectrum preprocessor
             max_length: Maximum sequence length
             split: Dataset split ('train', 'val', 'test')
@@ -93,8 +90,6 @@ class ParquetMSDataset(Dataset):
         """
         self.data_dir = data_dir
         self.tokenizer = tokenizer or AminoAcidTokenizer()
-        self.mod_tokenizer = mod_tokenizer or ModificationTokenizer(['ox'])
-        self.mod_parser = ModificationParser()
         self.preprocessor = preprocessor or SpectrumPreprocessor(
             max_mz=max_mz,
             top_k=top_k,
@@ -354,22 +349,9 @@ class ParquetMSDataset(Dataset):
         mz = data['mz']
         intensity = data['intensity']
         
-        # Parse modifications from sequence
-        parsed = self.mod_parser.parse(sequence)
-        clean_sequence = parsed['clean_sequence']
-        modifications = parsed['modifications']
-        
-        # Tokenize clean sequence
-        tokens = self.tokenizer.encode(clean_sequence, max_length=self.max_length, padding=True)
+        # Tokenize sequence
+        tokens = self.tokenizer.encode(sequence, max_length=self.max_length, padding=True)
         tokens = torch.LongTensor(tokens)
-        
-        # Tokenize modifications
-        mod_tokens = self.mod_tokenizer.encode_modifications(
-            modifications, 
-            max_length=self.max_length, 
-            padding=True
-        )
-        mod_tokens = torch.LongTensor(mod_tokens)
         
         # Create attention mask
         sequence_mask = tokens != self.tokenizer.pad_idx
@@ -385,7 +367,6 @@ class ParquetMSDataset(Dataset):
         
         return {
             'sequence_tokens': tokens,
-            'modification_tokens': mod_tokens,
             'sequence_mask': sequence_mask,
             'precursor_mz': torch.tensor([precursor_mz_val], dtype=torch.float32).squeeze(),
             'charge': torch.tensor([charge_val], dtype=torch.long).squeeze(),
@@ -406,7 +387,6 @@ def create_parquet_dataloaders(
     num_predictions: int = 100,
     max_length: int = 50,
     tokenizer: Optional[AminoAcidTokenizer] = None,
-    mod_tokenizer: Optional[ModificationTokenizer] = None,
     preprocessor: Optional[SpectrumPreprocessor] = None,
     **kwargs
 ):
@@ -426,7 +406,6 @@ def create_parquet_dataloaders(
         num_predictions: Number of predictions the model will make
         max_length: Maximum sequence length
         tokenizer: Optional shared tokenizer
-        mod_tokenizer: Optional shared modification tokenizer
         preprocessor: Optional shared preprocessor
         **kwargs: Additional arguments for ParquetMSDataset (e.g., cache_dataframes, max_files)
         
@@ -452,7 +431,6 @@ def create_parquet_dataloaders(
         num_predictions=num_predictions,
         max_length=max_length,
         tokenizer=tokenizer,
-        mod_tokenizer=mod_tokenizer,
         preprocessor=preprocessor,
         **kwargs
     )
@@ -482,7 +460,6 @@ def create_parquet_dataloaders(
         num_predictions=num_predictions,
         max_length=max_length,
         tokenizer=tokenizer,
-        mod_tokenizer=mod_tokenizer,
         preprocessor=preprocessor,
         cache_dataframes=cache_dataframes,
         shared_spectra_info=shared_spectra_info,
@@ -498,7 +475,6 @@ def create_parquet_dataloaders(
         num_predictions=num_predictions,
         max_length=max_length,
         tokenizer=tokenizer,
-        mod_tokenizer=mod_tokenizer,
         preprocessor=preprocessor,
         cache_dataframes=cache_dataframes,
         shared_spectra_info=shared_spectra_info,
@@ -514,7 +490,6 @@ def create_parquet_dataloaders(
         num_predictions=num_predictions,
         max_length=max_length,
         tokenizer=tokenizer,
-        mod_tokenizer=mod_tokenizer,
         preprocessor=preprocessor,
         cache_dataframes=cache_dataframes,
         shared_spectra_info=shared_spectra_info,

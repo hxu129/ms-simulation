@@ -4,28 +4,30 @@ experiment_name: ms_predictor_default
 seed: 42
 
 model:
-  vocab_size: 22  # 20 amino acids + PAD + UNK
+  vocab_size: 30  # 20 standard AAs + 4 modified AAs + 4 N-terminal mods + PAD + UNK
   hidden_dim: 512
   num_encoder_layers: 6
   num_decoder_layers: 6
   num_heads: 8
   dim_feedforward: 2048
   num_predictions: 200
-  max_length: 100
+  max_length: 50
   max_charge: 10
   dropout: 0.1
   activation: gelu
 
 data:
-  train_data_path: null  # Set to your Parquet data directory path
+  train_data_path: null  # Set to your training data path
+  val_data_path: null    # Set to your validation data path
+  test_data_path: null   # Set to your test data path
   batch_size: 32
-  num_workers: 0  # IMPORTANT: Use 0 for large datasets to avoid worker OOM
+  num_workers: 4
   max_mz: 1500.0
-  top_k: 20  # Number of top peaks to extract (should be >= num_predictions)
-  # Parquet-specific settings
-  metadata_file: null  # Optional: path to metadata JSON file
-  cache_dataframes: false  # Whether to pre-cache all data in memory
-  max_files: null  # Optional: limit number of Parquet files to load
+  top_k: 20
+  use_parquet: true  # Use Parquet format (recommended)
+  cache_dataframes: false  # Cache entire Parquet files in memory
+  max_files: null  # Limit number of Parquet files to load (null for all)
+  metadata_file: null  # Optional path to metadata JSON file
 
 loss:
   # Hungarian matching costs
@@ -34,7 +36,8 @@ loss:
   cost_confidence: 1.0
   
   # Loss weights
-  loss_mz_weight: 1.0
+  loss_mz_weight: 1.0  # Contrastive loss for m/z
+  loss_mz_l1_weight: 1.0  # L1 loss for m/z
   loss_intensity_weight: 1.0
   loss_confidence_weight: 1.0
   background_confidence_weight: 1.0
@@ -43,6 +46,9 @@ loss:
   use_cosine_loss: true
   cosine_loss_weight: 1.0
   cosine_bin_size: 1.0
+
+  # Scalar contrastive loss temperature
+  temperature: 0.0001
 
 optimizer:
   optimizer: adamw
@@ -73,7 +79,7 @@ training:
   
   # Early stopping
   early_stopping: false
-  early_stopping_patience: 20
+  early_stopping_patience: 10
   
   # Checkpointing
   checkpoint_dir: checkpoints
