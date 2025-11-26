@@ -264,7 +264,6 @@ class Trainer:
             with autocast(enabled=self.use_amp):
                 pred_mz, pred_intensity, pred_confidence_logits = self.model(
                     batch['sequence_tokens'],
-                    batch['modification_tokens'],
                     batch['sequence_mask'],
                     batch['precursor_mz'],
                     batch['charge']
@@ -381,7 +380,6 @@ class Trainer:
             
             pred_mz, pred_intensity, pred_confidence = self.model(
                 batch['sequence_tokens'],
-                batch['modification_tokens'],
                 batch['sequence_mask'],
                 batch['precursor_mz'],
                 batch['charge']
