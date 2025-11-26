@@ -36,7 +36,8 @@ loss:
   cost_confidence: 1.0
   
   # Loss weights
-  loss_mz_weight: 1.0
+  loss_mz_weight: 1.0  # Contrastive loss for m/z
+  loss_mz_l1_weight: 1.0  # L1 loss for m/z
   loss_intensity_weight: 1.0
   loss_confidence_weight: 1.0
   background_confidence_weight: 1.0
@@ -47,7 +48,7 @@ loss:
   cosine_bin_size: 1.0
 
   # Scalar contrastive loss temperature
-  temperature: 0.01
+  temperature: 0.0001
 
 optimizer:
   optimizer: adamw

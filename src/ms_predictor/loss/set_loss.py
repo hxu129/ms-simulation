@@ -71,6 +71,7 @@ class SetPredictionLoss(nn.Module):
         cost_intensity: float = 1.0,
         cost_confidence: float = 1.0,
         loss_mz_weight: float = 1.0,
+        loss_mz_l1_weight: float = 1.0,
         loss_intensity_weight: float = 1.0,
         loss_confidence_weight: float = 1.0,
         background_confidence_weight: float = 0.1,
@@ -83,7 +84,8 @@ class SetPredictionLoss(nn.Module):
             cost_mz: Weight for m/z cost in Hungarian matching
             cost_intensity: Weight for intensity cost in Hungarian matching
             cost_confidence: Weight for confidence cost in Hungarian matching
-            loss_mz_weight: Weight for m/z loss
+            loss_mz_weight: Weight for m/z contrastive loss
+            loss_mz_l1_weight: Weight for m/z L1 loss
             loss_intensity_weight: Weight for intensity loss
             loss_confidence_weight: Weight for confidence loss (matched predictions)
             background_confidence_weight: Weight for background confidence loss (unmatched predictions)
@@ -94,6 +96,7 @@ class SetPredictionLoss(nn.Module):
         self.matcher = HungarianMatcher(cost_mz, cost_intensity)
         
         self.loss_mz_weight = loss_mz_weight
+        self.loss_mz_l1_weight = loss_mz_l1_weight
         self.loss_intensity_weight = loss_intensity_weight
         self.loss_confidence_weight = loss_confidence_weight
         self.background_confidence_weight = background_confidence_weight
@@ -138,6 +141,7 @@ class SetPredictionLoss(nn.Module):
         
         # Initialize losses
         loss_mz = torch.tensor(0.0, device=pred_mz.device)
+        loss_mz_l1 = torch.tensor(0.0, device=pred_mz.device)
         loss_intensity = torch.tensor(0.0, device=pred_mz.device)
         loss_confidence_matched = torch.tensor(0.0, device=pred_mz.device)
         loss_confidence_background = torch.tensor(0.0, device=pred_mz.device)
@@ -159,6 +163,9 @@ class SetPredictionLoss(nn.Module):
             loss_mz = scalar_contrastive_loss(
                 pred_mz, target_mz, indices, temperature=self.temperature
             )
+            
+            # L1 loss for m/z
+            loss_mz_l1 = F.l1_loss(matched_pred_mz, matched_target_mz)
             
             # L1 loss for intensity
             loss_intensity = F.l1_loss(matched_pred_intensity, matched_target_intensity)
@@ -186,7 +193,8 @@ class SetPredictionLoss(nn.Module):
         
         # Total loss
         total_loss = (
-            self.loss_mz_weight * loss_mz +
+            self.loss_mz_weight * loss_mz +  # contrastive loss
+            self.loss_mz_l1_weight * loss_mz_l1 +  # L1 loss
             self.loss_intensity_weight * loss_intensity +
             self.loss_confidence_weight * loss_confidence_matched +
             self.background_confidence_weight * loss_confidence_background
@@ -195,6 +203,7 @@ class SetPredictionLoss(nn.Module):
         return {
             'loss': total_loss,
             'loss_mz': loss_mz,
+            'loss_mz_l1': loss_mz_l1,
             'loss_intensity': loss_intensity,
             'loss_confidence_matched': loss_confidence_matched,
             'loss_confidence_background': loss_confidence_background,

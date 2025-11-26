@@ -80,9 +80,11 @@ class Trainer:
             cost_intensity=config.loss.cost_intensity,
             cost_confidence=config.loss.cost_confidence,
             loss_mz_weight=config.loss.loss_mz_weight,
+            loss_mz_l1_weight=config.loss.loss_mz_l1_weight,
             loss_intensity_weight=config.loss.loss_intensity_weight,
             loss_confidence_weight=config.loss.loss_confidence_weight,
-            background_confidence_weight=config.loss.background_confidence_weight
+            background_confidence_weight=config.loss.background_confidence_weight,
+            temperature=config.loss.temperature
         )
         
         if config.loss.use_cosine_loss:
@@ -155,6 +157,7 @@ class Trainer:
                 },
                 'loss': {
                     'loss_mz_weight': self.config.loss.loss_mz_weight,
+                    'loss_mz_l1_weight': self.config.loss.loss_mz_l1_weight,
                     'loss_intensity_weight': self.config.loss.loss_intensity_weight,
                     'loss_confidence_weight': self.config.loss.loss_confidence_weight,
                     'background_confidence_weight': self.config.loss.background_confidence_weight,
@@ -246,6 +249,7 @@ class Trainer:
         total_loss = 0.0
         total_set_loss = 0.0
         total_mz_loss = 0.0
+        total_mz_l1_loss = 0.0
         total_intensity_loss = 0.0
         total_confidence_matched_loss = 0.0
         total_confidence_background_loss = 0.0
@@ -312,6 +316,7 @@ class Trainer:
             total_loss += loss.item()
             total_set_loss += loss_dict['loss'].item()
             total_mz_loss += loss_dict['loss_mz'].item()
+            total_mz_l1_loss += loss_dict['loss_mz_l1'].item()
             total_intensity_loss += loss_dict['loss_intensity'].item()
             total_confidence_matched_loss += loss_dict['loss_confidence_matched'].item()
             total_confidence_background_loss += loss_dict['loss_confidence_background'].item()
@@ -326,6 +331,7 @@ class Trainer:
                     'train/total_loss': loss.item(),
                     'train/set_loss': loss_dict['loss'].item(),
                     'train/mz_loss': loss_dict['loss_mz'].item(),
+                    'train/mz_l1_loss': loss_dict['loss_mz_l1'].item(),
                     'train/intensity_loss': loss_dict['loss_intensity'].item(),
                     'train/confidence_loss_matched': loss_dict['loss_confidence_matched'].item(),
                     'train/confidence_loss_background': loss_dict['loss_confidence_background'].item(),
@@ -345,6 +351,7 @@ class Trainer:
             'loss': total_loss / num_batches,
             'set_loss': total_set_loss / num_batches,
             'mz_loss': total_mz_loss / num_batches,
+            'mz_l1_loss': total_mz_l1_loss / num_batches,
             'intensity_loss': total_intensity_loss / num_batches,
             'confidence_loss_matched': total_confidence_matched_loss / num_batches,
             'confidence_loss_background': total_confidence_background_loss / num_batches,
@@ -367,6 +374,7 @@ class Trainer:
         total_loss = 0.0
         total_set_loss = 0.0
         total_mz_loss = 0.0
+        total_mz_l1_loss = 0.0
         total_intensity_loss = 0.0
         total_confidence_matched_loss = 0.0
         total_confidence_background_loss = 0.0
@@ -403,6 +411,7 @@ class Trainer:
             total_loss += loss.item()
             total_set_loss += loss_dict['loss'].item()
             total_mz_loss += loss_dict['loss_mz'].item()
+            total_mz_l1_loss += loss_dict['loss_mz_l1'].item()
             total_intensity_loss += loss_dict['loss_intensity'].item()
             total_confidence_matched_loss += loss_dict['loss_confidence_matched'].item()
             total_confidence_background_loss += loss_dict['loss_confidence_background'].item()
@@ -415,6 +424,7 @@ class Trainer:
             'val_loss': total_loss / num_batches,
             'val_set_loss': total_set_loss / num_batches,
             'val_mz_loss': total_mz_loss / num_batches,
+            'val_mz_l1_loss': total_mz_l1_loss / num_batches,
             'val_intensity_loss': total_intensity_loss / num_batches,
             'val_confidence_loss_matched': total_confidence_matched_loss / num_batches,
             'val_confidence_loss_background': total_confidence_background_loss / num_batches,
@@ -427,6 +437,7 @@ class Trainer:
                 'val/total_loss': avg_metrics['val_loss'],
                 'val/set_loss': avg_metrics['val_set_loss'],
                 'val/mz_loss': avg_metrics['val_mz_loss'],
+                'val/mz_l1_loss': avg_metrics['val_mz_l1_loss'],
                 'val/intensity_loss': avg_metrics['val_intensity_loss'],
                 'val/confidence_loss_matched': avg_metrics['val_confidence_loss_matched'],
                 'val/confidence_loss_background': avg_metrics['val_confidence_loss_background'],
@@ -481,7 +492,8 @@ class Trainer:
             self.logger.info(f"Epoch {epoch + 1}/{self.config.training.num_epochs}")
             self.logger.info(f"  Train loss: {train_metrics['loss']:.4f}")
             self.logger.info(f"    - Set loss: {train_metrics['set_loss']:.4f}")
-            self.logger.info(f"    - M/Z loss: {train_metrics['mz_loss']:.4f}")
+            self.logger.info(f"    - M/Z loss (contrastive): {train_metrics['mz_loss']:.4f}")
+            self.logger.info(f"    - M/Z loss (L1): {train_metrics['mz_l1_loss']:.4f}")
             self.logger.info(f"    - Intensity loss: {train_metrics['intensity_loss']:.4f}")
             self.logger.info(f"    - Confidence loss (matched): {train_metrics['confidence_loss_matched']:.4f}")
             self.logger.info(f"    - Confidence loss (background): {train_metrics['confidence_loss_background']:.4f}")
@@ -495,6 +507,7 @@ class Trainer:
                     'train/epoch_loss': train_metrics['loss'],
                     'train/epoch_set_loss': train_metrics['set_loss'],
                     'train/epoch_mz_loss': train_metrics['mz_loss'],
+                    'train/epoch_mz_l1_loss': train_metrics['mz_l1_loss'],
                     'train/epoch_intensity_loss': train_metrics['intensity_loss'],
                     'train/epoch_confidence_loss_matched': train_metrics['confidence_loss_matched'],
                     'train/epoch_confidence_loss_background': train_metrics['confidence_loss_background'],
@@ -507,7 +520,8 @@ class Trainer:
                 if val_metrics:
                     self.logger.info(f"  Val loss: {val_metrics['val_loss']:.4f}")
                     self.logger.info(f"    - Set loss: {val_metrics['val_set_loss']:.4f}")
-                    self.logger.info(f"    - M/Z loss: {val_metrics['val_mz_loss']:.4f}")
+                    self.logger.info(f"    - M/Z loss (contrastive): {val_metrics['val_mz_loss']:.4f}")
+                    self.logger.info(f"    - M/Z loss (L1): {val_metrics['val_mz_l1_loss']:.4f}")
                     self.logger.info(f"    - Intensity loss: {val_metrics['val_intensity_loss']:.4f}")
                     self.logger.info(f"    - Confidence loss (matched): {val_metrics['val_confidence_loss_matched']:.4f}")
                     self.logger.info(f"    - Confidence loss (background): {val_metrics['val_confidence_loss_background']:.4f}")

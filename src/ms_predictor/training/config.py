@@ -57,6 +57,7 @@ class LossConfig:
     
     # Loss weights
     loss_mz_weight: float = 1.0
+    loss_mz_l1_weight: float = 1.0
     loss_intensity_weight: float = 1.0
     loss_confidence_weight: float = 1.0
     background_confidence_weight: float = 0.1
