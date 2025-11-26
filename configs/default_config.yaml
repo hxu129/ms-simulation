@@ -78,7 +78,7 @@ training:
   save_interval: 5
   
   # Early stopping
-  early_stopping: true
+  early_stopping: false
   early_stopping_patience: 10
   
   # Checkpointing
