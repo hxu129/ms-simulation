@@ -16,6 +16,47 @@ from .hungarian_matching import FastHungarianMatcher as HungarianMatcher, get_ma
 # from .hungarian_matching_greedy import GreedyMatcher as HungarianMatcher, get_matched_pairs
 
 
+def scalar_contrastive_loss(pred_mz, gt_mz, indices, temperature=0.01):
+    """
+    直接在标量空间做对比学习。
+    
+    pred_mz: [Batch, N_pred] (已归一化到 0-1)
+    gt_mz:   [Batch, N_gt]   (已归一化到 0-1)
+    indices: 匈牙利匹配结果
+    temperature: 调节梯度的锐度，越小越强硬
+    """
+    loss = 0
+    batch_size = pred_mz.shape[0]
+    
+    for b in range(batch_size):
+        row_ind, col_ind = indices[b]
+        
+        # 1. 取出匹配对
+        # anchor: 预测出的 m/z (只取匹配上的)
+        anchor = pred_mz[b][row_ind].unsqueeze(1)  # [K, 1]
+        
+        # 2. 构建对比集合 (Positives + Negatives)
+        # 在这个图谱中，所有的真实峰都是"候选对象"
+        # 对应的 col_ind 是正样本，其他的都是负样本
+        targets = gt_mz[b].unsqueeze(0)            # [1, M]
+        
+        # 3. 计算 L1 距离矩阵
+        # dist_matrix[i, j] = |pred_i - gt_j|
+        dist_matrix = torch.abs(anchor - targets)  # [K, M] Broadcast
+        
+        # 4. 转化为 Similarity (Sim = -Distance)
+        logits = -dist_matrix / temperature
+        
+        # 5. 计算 Cross Entropy
+        # 目标：每一行 pred_i 应该匹配到 col_ind[i] 这一列
+        # label 就是 col_ind
+        target_labels = torch.tensor(col_ind).to(pred_mz.device)
+        
+        loss += F.cross_entropy(logits, target_labels)
+        
+    return loss / batch_size
+
+
 class SetPredictionLoss(nn.Module):
     """
     Set prediction loss for mass spectrum prediction.
@@ -32,7 +73,8 @@ class SetPredictionLoss(nn.Module):
         loss_mz_weight: float = 1.0,
         loss_intensity_weight: float = 1.0,
         loss_confidence_weight: float = 1.0,
-        background_confidence_weight: float = 0.1
+        background_confidence_weight: float = 0.1,
+        temperature: float = 0.01
     ):
         """
         Initialize set prediction loss.
@@ -45,6 +87,7 @@ class SetPredictionLoss(nn.Module):
             loss_intensity_weight: Weight for intensity loss
             loss_confidence_weight: Weight for confidence loss (matched predictions)
             background_confidence_weight: Weight for background confidence loss (unmatched predictions)
+            temperature: Temperature parameter for scalar contrastive loss (lower = sharper gradients)
         """
         super().__init__()
         
@@ -54,6 +97,7 @@ class SetPredictionLoss(nn.Module):
         self.loss_intensity_weight = loss_intensity_weight
         self.loss_confidence_weight = loss_confidence_weight
         self.background_confidence_weight = background_confidence_weight
+        self.temperature = temperature
     
     def forward(
         self,
@@ -111,8 +155,10 @@ class SetPredictionLoss(nn.Module):
             matched_target_mz = target_mz[batch_idx, target_idx]
             matched_target_intensity = target_intensity[batch_idx, target_idx]
             
-            # L1 loss for m/z
-            loss_mz = F.l1_loss(matched_pred_mz, matched_target_mz)
+            # Scalar contrastive loss for m/z
+            loss_mz = scalar_contrastive_loss(
+                pred_mz, target_mz, indices, temperature=self.temperature
+            )
             
             # L1 loss for intensity
             loss_intensity = F.l1_loss(matched_pred_intensity, matched_target_intensity)

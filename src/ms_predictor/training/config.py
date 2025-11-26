@@ -66,6 +66,9 @@ class LossConfig:
     cosine_loss_weight: float = 0.5  # Tunable scaler
     cosine_bin_size: float = 1.0
 
+    # Scalar contrastive loss temperature
+    temperature: float = 0.01
+
 
 @dataclass
 class OptimizerConfig:

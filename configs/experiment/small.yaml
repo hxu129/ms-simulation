@@ -13,6 +13,7 @@ model:
 
 data:
   batch_size: 64
+  max_files: 2
 
 training:
   num_epochs: 50
