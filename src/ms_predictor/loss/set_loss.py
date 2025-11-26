@@ -49,21 +49,15 @@ class CosineAnnealer:
 
 
 def new_scalar_contrastive_loss(pred_mz, gt_mz, indices, temperature=0.01):
-    """
-    加速版：移除 Python 循环，利用 GPU 并行计算。
-    """
     device = pred_mz.device
     batch_size = pred_mz.shape[0]
 
-    # --- 1. 预处理索引 (这是唯一保留的轻量循环，只用于构建索引) ---
-    # 我们需要构建全局的索引，把 batch 中所有匹配的 pairs 收集起来
+    # --- 1. 预处理索引  ---
     batch_idx_list = []
     row_idx_list = []
     col_idx_list = []
 
-    # 这一步非常快，因为只处理整数索引，不涉及矩阵运算
     for b, (row_ind, col_ind) in enumerate(indices):
-        # row_ind, col_ind 可能是 numpy 数组或 tensor，统一转 tensor
         r = torch.as_tensor(row_ind, device=device, dtype=torch.long)
         c = torch.as_tensor(col_ind, device=device, dtype=torch.long)
         
@@ -83,14 +77,9 @@ def new_scalar_contrastive_loss(pred_mz, gt_mz, indices, temperature=0.01):
     # --- 2. 批量提取数据 (Gather) ---
     
     # 取出所有匹配上的 Anchor (预测值)
-    # pred_mz: [B, N_pred] -> selected: [Total_Matches]
-    # b_idx 和 row_idx 共同定位具体的标量值
     anchors = pred_mz[b_idx, row_idx].unsqueeze(1) # [Total_Matches, 1]
 
     # 取出对应的 Ground Truth 集合
-    # 这一步很关键：每个 anchor 都要和它所属那张图的**所有** GT 比较
-    # gt_mz: [B, N_gt] -> selected: [Total_Matches, N_gt]
-    # 使用 b_idx 索引，会自动把对应的 GT 行复制给该 Batch 下所有的 anchor
     targets_set = gt_mz[b_idx] 
 
     # --- 3. 矩阵并行计算 ---
@@ -103,55 +92,9 @@ def new_scalar_contrastive_loss(pred_mz, gt_mz, indices, temperature=0.01):
 
     # --- 4. 计算 Loss ---
     
-    # 这里的 target_labels 对应的是 targets_set 中的列索引 (col_ind)
-    # 默认 reduction='mean' 会对所有匹配项求平均
-    # 原代码是 loss / batch_size (即对图求平均)，如果每个图匹配数差异巨大，
-    # 建议使用 reduction='sum' 然后手动除以 batch_size
-    
     loss = F.cross_entropy(logits, target_labels, reduction='sum')
     
     return loss / batch_size
-
-def old_scalar_contrastive_loss(pred_mz, gt_mz, indices, temperature=0.01):
-    """
-    直接在标量空间做对比学习。
-    
-    pred_mz: [Batch, N_pred] (已归一化到 0-1)
-    gt_mz:   [Batch, N_gt]   (已归一化到 0-1)
-    indices: 匈牙利匹配结果
-    temperature: 调节梯度的锐度，越小越强硬
-    """
-    loss = 0
-    batch_size = pred_mz.shape[0]
-    
-    for b in range(batch_size):
-        row_ind, col_ind = indices[b]
-        
-        # 1. 取出匹配对
-        # anchor: 预测出的 m/z (只取匹配上的)
-        anchor = pred_mz[b][row_ind].unsqueeze(1)  # [K, 1]
-        
-        # 2. 构建对比集合 (Positives + Negatives)
-        # 在这个图谱中，所有的真实峰都是"候选对象"
-        # 对应的 col_ind 是正样本，其他的都是负样本
-        targets = gt_mz[b].unsqueeze(0)            # [1, M]
-        
-        # 3. 计算 L1 距离矩阵
-        # dist_matrix[i, j] = |pred_i - gt_j|
-        dist_matrix = torch.abs(anchor - targets)  # [K, M] Broadcast
-        
-        # 4. 转化为 Similarity (Sim = -Distance)
-        logits = -dist_matrix / temperature
-        
-        # 5. 计算 Cross Entropy
-        # 目标：每一行 pred_i 应该匹配到 col_ind[i] 这一列
-        # label 就是 col_ind
-        target_labels = torch.tensor(col_ind).to(pred_mz.device)
-        
-        loss += F.cross_entropy(logits, target_labels)
-        
-    return loss / batch_size
-
 
 class SetPredictionLoss(nn.Module):
     """
