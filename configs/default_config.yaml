@@ -36,15 +36,20 @@ loss:
   cost_confidence: 1.0
   
   # Loss weights
-  loss_mz_weight: 1.0  # Contrastive loss for m/z
-  loss_mz_l1_weight: 1.0  # L1 loss for m/z
+  loss_mz_weight: 0.0  # Contrastive loss for m/z
+  loss_mz_l1_weight: 0.0  # L1 loss for m/z
+  loss_mz_wing_weight: 1.0  # Wing loss for m/z
   loss_intensity_weight: 1.0
   loss_confidence_weight: 1.0
   background_confidence_weight: 1.0
   
+  # Wing loss hyperparameters
+  wing_w: 0.08  # Width parameter for Wing loss
+  wing_epsilon: 0.008  # Epsilon parameter for Wing loss
+  
   # Cosine similarity loss (tunable scaler)
   use_cosine_loss: true
-  cosine_loss_weight: 1.0
+  cosine_loss_weight: 0.0
   cosine_bin_size: 1.0
 
   # Scalar contrastive loss temperature

@@ -58,9 +58,14 @@ class LossConfig:
     # Loss weights
     loss_mz_weight: float = 1.0
     loss_mz_l1_weight: float = 1.0
+    loss_mz_wing_weight: float = 1.0
     loss_intensity_weight: float = 1.0
     loss_confidence_weight: float = 1.0
     background_confidence_weight: float = 0.1
+    
+    # Wing loss hyperparameters
+    wing_w: float = 10.0
+    wing_epsilon: float = 2.0
     
     # Cosine similarity loss
     use_cosine_loss: bool = True

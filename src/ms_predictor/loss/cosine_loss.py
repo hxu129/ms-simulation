@@ -161,7 +161,8 @@ class CosineSimilarityLoss(nn.Module):
             angle = torch.acos(cosine_sim)
             loss = (angle / torch.pi).mean()
             
-        return self.weight * loss
+        # return self.weight * loss
+        return loss
 
 
 class SpectralAngleLoss(nn.Module):

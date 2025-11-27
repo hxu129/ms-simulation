@@ -17,6 +17,41 @@ from .hungarian_matching import FastHungarianMatcher as HungarianMatcher, get_ma
 
 import math
 
+
+def wing_loss(x: torch.Tensor, w: float = 10.0, epsilon: float = 2.0) -> torch.Tensor:
+    """
+    Wing loss function from "Wing Loss for Robust Facial Landmark Localisation 
+    with Convolutional Neural Networks" (CVPR 2018).
+    
+    The Wing loss is designed to improve training for small and medium range errors
+    by amplifying their impact on the loss.
+    
+    Args:
+        x: Input tensor (typically the error: prediction - target)
+        w: Width parameter that sets the range of the nonlinear part to (-w, w)
+        epsilon: Parameter that controls the curvature of the nonlinear region
+        
+    Returns:
+        Wing loss value
+        
+    Formula:
+        wing(x) = w * ln(1 + |x|/epsilon)     if |x| < w
+                = |x| - C                      otherwise
+        where C = w - w*ln(1 + w/epsilon)
+    """
+    abs_x = torch.abs(x)
+    C = w - w * math.log(1 + w / epsilon)
+    
+    # Compute loss based on piecewise definition
+    loss = torch.where(
+        abs_x < w,
+        w * torch.log(1 + abs_x / epsilon),
+        abs_x - C
+    )
+    
+    return loss.mean()
+
+
 class CosineAnnealer:
     def __init__(self, start_value, end_value, total_steps):
         """
@@ -111,10 +146,13 @@ class SetPredictionLoss(nn.Module):
         cost_confidence: float = 1.0,
         loss_mz_weight: float = 1.0,
         loss_mz_l1_weight: float = 1.0,
+        loss_mz_wing_weight: float = 1.0,
         loss_intensity_weight: float = 1.0,
         loss_confidence_weight: float = 1.0,
         background_confidence_weight: float = 0.1,
-        temperature: float = 0.01
+        temperature: float = 0.01,
+        wing_w: float = 10.0,
+        wing_epsilon: float = 2.0
     ):
         """
         Initialize set prediction loss.
@@ -125,10 +163,13 @@ class SetPredictionLoss(nn.Module):
             cost_confidence: Weight for confidence cost in Hungarian matching
             loss_mz_weight: Weight for m/z contrastive loss
             loss_mz_l1_weight: Weight for m/z L1 loss
+            loss_mz_wing_weight: Weight for m/z Wing loss
             loss_intensity_weight: Weight for intensity loss
             loss_confidence_weight: Weight for confidence loss (matched predictions)
             background_confidence_weight: Weight for background confidence loss (unmatched predictions)
             temperature: Temperature parameter for scalar contrastive loss (lower = sharper gradients)
+            wing_w: Wing loss width parameter (range of nonlinear part)
+            wing_epsilon: Wing loss epsilon parameter (controls curvature)
         """
         super().__init__()
         
@@ -136,10 +177,13 @@ class SetPredictionLoss(nn.Module):
         
         self.loss_mz_weight = loss_mz_weight
         self.loss_mz_l1_weight = loss_mz_l1_weight
+        self.loss_mz_wing_weight = loss_mz_wing_weight
         self.loss_intensity_weight = loss_intensity_weight
         self.loss_confidence_weight = loss_confidence_weight
         self.background_confidence_weight = background_confidence_weight
         self.temperature = temperature
+        self.wing_w = wing_w
+        self.wing_epsilon = wing_epsilon
         self.cosine_annealer = CosineAnnealer(0.01, 0.0007, 200*(2048+256))
     
     def forward(
@@ -182,6 +226,7 @@ class SetPredictionLoss(nn.Module):
         # Initialize losses
         loss_mz = torch.tensor(0.0, device=pred_mz.device)
         loss_mz_l1 = torch.tensor(0.0, device=pred_mz.device)
+        loss_mz_wing = torch.tensor(0.0, device=pred_mz.device)
         loss_intensity = torch.tensor(0.0, device=pred_mz.device)
         loss_confidence_matched = torch.tensor(0.0, device=pred_mz.device)
         loss_confidence_background = torch.tensor(0.0, device=pred_mz.device)
@@ -208,6 +253,13 @@ class SetPredictionLoss(nn.Module):
             
             # L1 loss for m/z
             loss_mz_l1 = F.l1_loss(matched_pred_mz, matched_target_mz)
+            
+            # Wing loss for m/z
+            loss_mz_wing = wing_loss(
+                matched_pred_mz - matched_target_mz,
+                w=self.wing_w,
+                epsilon=self.wing_epsilon
+            )
             
             # L1 loss for intensity
             loss_intensity = F.l1_loss(matched_pred_intensity, matched_target_intensity)
@@ -237,6 +289,7 @@ class SetPredictionLoss(nn.Module):
         total_loss = (
             self.loss_mz_weight * loss_mz +  # contrastive loss
             self.loss_mz_l1_weight * loss_mz_l1 +  # L1 loss
+            self.loss_mz_wing_weight * loss_mz_wing +  # Wing loss
             self.loss_intensity_weight * loss_intensity +
             self.loss_confidence_weight * loss_confidence_matched +
             self.background_confidence_weight * loss_confidence_background
@@ -246,6 +299,7 @@ class SetPredictionLoss(nn.Module):
             'loss': total_loss,
             'loss_mz': loss_mz,
             'loss_mz_l1': loss_mz_l1,
+            'loss_mz_wing': loss_mz_wing,
             'loss_intensity': loss_intensity,
             'loss_confidence_matched': loss_confidence_matched,
             'loss_confidence_background': loss_confidence_background,
