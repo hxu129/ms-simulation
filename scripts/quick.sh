@@ -1,0 +1,1 @@
+python scripts/train.py +data=parquet +experiment=small
