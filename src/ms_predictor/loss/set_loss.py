@@ -140,7 +140,7 @@ class SetPredictionLoss(nn.Module):
         self.loss_confidence_weight = loss_confidence_weight
         self.background_confidence_weight = background_confidence_weight
         self.temperature = temperature
-        self.cosine_annealer = CosineAnnealer(0.01, 0.0007, 200)
+        self.cosine_annealer = CosineAnnealer(0.01, 0.0007, 200*(2048+256))
     
     def forward(
         self,
