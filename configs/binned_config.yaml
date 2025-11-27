@@ -1,0 +1,87 @@
+# Configuration for binned MS spectrum predictor
+
+experiment_name: ms_predictor_binned
+seed: 42
+
+model:
+  vocab_size: 30  # 20 standard AAs + 4 modified AAs + 4 N-terminal mods + PAD + UNK
+  hidden_dim: 512
+  num_encoder_layers: 6
+  num_heads: 8
+  dim_feedforward: 2048
+  num_bins: 1500  # Number of bins for spectrum representation
+  max_length: 50
+  max_charge: 10
+  dropout: 0.1
+  activation: gelu
+
+data:
+  train_data_path: /root/autodl-fs/Nature_HCC/  # Path to Parquet data directory
+  val_data_path: null    # Optional: Set to your validation data path
+  test_data_path: null   # Optional: Set to your test data path
+  batch_size: 32
+  num_workers: 4
+  max_mz: 1500.0  # Maximum m/z value (defines binning range)
+  top_k: 20
+  use_parquet: true  # Use Parquet format (recommended)
+  cache_dataframes: false  # Cache entire Parquet files in memory (set to false for large datasets)
+  max_files: 1  # Limit number of Parquet files to load (null for all)
+  metadata_file: null  # Optional path to metadata JSON file
+
+loss:
+  # Binned cosine loss parameters
+  cosine_loss_weight: 1.0
+  cosine_bin_size: 1.0
+  normalize_bins: true
+
+optimizer:
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1.0e-08
+  
+  # Learning rate scheduler
+  scheduler: cosine
+  warmup_epochs: 0
+  min_lr: 1.0e-04
+  
+  # For StepLR
+  step_size: 10
+  gamma: 0.1
+  
+  # For ReduceLROnPlateau
+  patience: 5
+  factor: 0.5
+
+training:
+  num_epochs: 200
+  gradient_clip: 1.0
+  log_interval: 10
+  val_interval: 1
+  save_interval: 5
+  
+  # Early stopping
+  early_stopping: false
+  early_stopping_patience: 10
+  
+  # Checkpointing
+  checkpoint_dir: /root/autodl-tmp/checkpoints
+  save_best_only: false
+  
+  # Device
+  device: cuda
+  mixed_precision: true
+
+inference:
+  max_mz: 1500.0
+  batch_size: 64
+
+wandb:
+  enabled: true  # Enable/disable wandb logging
+  project: ms-predictor-binned  # Wandb project name
+  entity: null  # Wandb entity/username (optional)
+  mode: online  # online, offline, or disabled
+  log_interval: 10  # Log every N steps
+  dir: /root/autodl-tmp  # Directory for wandb logs
+
