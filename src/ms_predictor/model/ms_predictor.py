@@ -8,6 +8,7 @@ from typing import Dict, Tuple, Optional
 
 from .embeddings import InputEmbedding, LearnableQueryEmbedding
 from .encoder import Encoder
+from .predfull_encoder import PredFullEncoder
 from .decoder import Decoder
 from .heads import PredictionHeads
 
@@ -28,6 +29,7 @@ class MSPredictor(nn.Module):
         self,
         vocab_size: int,
         hidden_dim: int = 512,
+        encoder_type: str = 'transformer',
         num_encoder_layers: int = 6,
         num_decoder_layers: int = 6,
         num_heads: int = 8,
@@ -36,7 +38,10 @@ class MSPredictor(nn.Module):
         max_length: int = 50,
         max_charge: int = 10,
         dropout: float = 0.1,
-        activation: str = 'gelu'
+        activation: str = 'gelu',
+        conv_kernel_sizes: list = None,
+        num_se_blocks: int = 10,
+        se_reduction: int = 16
     ):
         """
         Initialize MS predictor model.
@@ -44,22 +49,31 @@ class MSPredictor(nn.Module):
         Args:
             vocab_size: Size of amino acid vocabulary
             hidden_dim: Dimension of hidden representations
-            num_encoder_layers: Number of encoder layers
+            encoder_type: Type of encoder ('transformer' or 'predfull')
+            num_encoder_layers: Number of encoder layers (for transformer encoder)
             num_decoder_layers: Number of decoder layers
-            num_heads: Number of attention heads
-            dim_feedforward: Dimension of feedforward networks
+            num_heads: Number of attention heads (for transformer encoder)
+            dim_feedforward: Dimension of feedforward networks (for transformer encoder)
             num_predictions: Number of predictions to make (N)
             max_length: Maximum peptide sequence length
             max_charge: Maximum charge state
             dropout: Dropout rate
             activation: Activation function
+            conv_kernel_sizes: List of kernel sizes for parallel convolutions (for predfull encoder)
+            num_se_blocks: Number of SE blocks (for predfull encoder)
+            se_reduction: Reduction ratio for SE blocks (for predfull encoder)
         """
         super().__init__()
         
         self.vocab_size = vocab_size
         self.hidden_dim = hidden_dim
+        self.encoder_type = encoder_type
         self.num_predictions = num_predictions
         self.max_length = max_length
+        
+        # Set default conv_kernel_sizes if not provided
+        if conv_kernel_sizes is None:
+            conv_kernel_sizes = [2, 3, 4, 5, 6, 7, 8, 9]
         
         # Input embedding (combines peptide tokens and metadata)
         self.input_embedding = InputEmbedding(
@@ -71,15 +85,27 @@ class MSPredictor(nn.Module):
             dropout=dropout
         )
         
-        # Transformer encoder
-        self.encoder = Encoder(
-            hidden_dim=hidden_dim,
-            num_layers=num_encoder_layers,
-            num_heads=num_heads,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            activation=activation
-        )
+        # Encoder (Transformer or PredFull)
+        if encoder_type == 'transformer':
+            self.encoder = Encoder(
+                hidden_dim=hidden_dim,
+                num_layers=num_encoder_layers,
+                num_heads=num_heads,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                activation=activation
+            )
+        elif encoder_type == 'predfull':
+            self.encoder = PredFullEncoder(
+                hidden_dim=hidden_dim,
+                conv_kernel_sizes=conv_kernel_sizes,
+                num_se_blocks=num_se_blocks,
+                se_reduction=se_reduction,
+                dropout=dropout,
+                activation=activation
+            )
+        else:
+            raise ValueError(f"Invalid encoder_type: {encoder_type}. Must be 'transformer' or 'predfull'.")
         
         # Learnable query embeddings
         self.query_embedding = LearnableQueryEmbedding(
@@ -149,9 +175,17 @@ class MSPredictor(nn.Module):
         # Convert to padding mask: True for padding positions
         encoder_padding_mask = ~full_mask
         
-        # 2. Encode with Transformer encoder
-        encoder_output = self.encoder(embedded, src_key_padding_mask=encoder_padding_mask)
-        # encoder_output shape: (batch_size, 2 + seq_len, hidden_dim)
+        # 2. Encode with encoder (Transformer or PredFull)
+        if self.encoder_type == 'transformer':
+            encoder_output = self.encoder(embedded, src_key_padding_mask=encoder_padding_mask)
+            # encoder_output shape: (batch_size, 2 + seq_len, hidden_dim)
+        elif self.encoder_type == 'predfull':
+            encoder_output = self.encoder(embedded)
+            # encoder_output shape: (batch_size, hidden_dim, 2 + seq_len)
+            # Transpose to (batch_size, 2 + seq_len, hidden_dim) for decoder
+            encoder_output = encoder_output.transpose(1, 2)
+        else:
+            raise ValueError(f"Invalid encoder_type: {self.encoder_type}")
         
         # 3. Get learnable query embeddings
         queries = self.query_embedding(batch_size)

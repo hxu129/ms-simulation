@@ -256,7 +256,7 @@ class SetPredictionLoss(nn.Module):
             
             # Wing loss for m/z
             loss_mz_wing = wing_loss(
-                matched_pred_mz - matched_target_mz,
+                1500*(matched_pred_mz - matched_target_mz),
                 w=self.wing_w,
                 epsilon=self.wing_epsilon
             )

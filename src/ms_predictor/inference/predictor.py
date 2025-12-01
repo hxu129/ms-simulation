@@ -293,6 +293,7 @@ def load_model_for_inference(
     model = MSPredictor(
         vocab_size=config.model.vocab_size,
         hidden_dim=config.model.hidden_dim,
+        encoder_type=getattr(config.model, 'encoder_type', 'transformer'),
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         num_heads=config.model.num_heads,
@@ -301,7 +302,10 @@ def load_model_for_inference(
         max_length=config.model.max_length,
         max_charge=config.model.max_charge,
         dropout=config.model.dropout,
-        activation=config.model.activation
+        activation=config.model.activation,
+        conv_kernel_sizes=getattr(config.model, 'conv_kernel_sizes', None),
+        num_se_blocks=getattr(config.model, 'num_se_blocks', 10),
+        se_reduction=getattr(config.model, 'se_reduction', 16)
     )
     
     # Load weights

@@ -192,6 +192,7 @@ def main(cfg: DictConfig):
     model = MSPredictor(
         vocab_size=cfg.model.vocab_size,
         hidden_dim=cfg.model.hidden_dim,
+        encoder_type=cfg.model.get('encoder_type', 'transformer'),
         num_encoder_layers=cfg.model.num_encoder_layers,
         num_decoder_layers=cfg.model.num_decoder_layers,
         num_heads=cfg.model.num_heads,
@@ -200,7 +201,10 @@ def main(cfg: DictConfig):
         max_length=cfg.model.max_length,
         max_charge=cfg.model.max_charge,
         dropout=cfg.model.dropout,
-        activation=cfg.model.activation
+        activation=cfg.model.activation,
+        conv_kernel_sizes=cfg.model.get('conv_kernel_sizes', None),
+        num_se_blocks=cfg.model.get('num_se_blocks', 10),
+        se_reduction=cfg.model.get('se_reduction', 16)
     )
     
     num_params = count_parameters(model)

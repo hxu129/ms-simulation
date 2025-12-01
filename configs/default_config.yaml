@@ -6,10 +6,20 @@ seed: 42
 model:
   vocab_size: 30  # 20 standard AAs + 4 modified AAs + 4 N-terminal mods + PAD + UNK
   hidden_dim: 512
+  encoder_type: predfull  # Options: 'transformer' or 'predfull'
+  
+  # Transformer encoder params (used when encoder_type='transformer')
   num_encoder_layers: 6
   num_decoder_layers: 6
   num_heads: 8
   dim_feedforward: 2048
+  
+  # PredFull encoder params (used when encoder_type='predfull')
+  conv_kernel_sizes: [2, 3, 4, 5, 6, 7, 8, 9]
+  num_se_blocks: 10
+  se_reduction: 16
+  
+  # Common params
   num_predictions: 200
   max_length: 50
   max_charge: 10
@@ -44,8 +54,8 @@ loss:
   background_confidence_weight: 1.0
   
   # Wing loss hyperparameters
-  wing_w: 0.08  # Width parameter for Wing loss
-  wing_epsilon: 0.008  # Epsilon parameter for Wing loss
+  wing_w: 150.0  # Width parameter for Wing loss
+  wing_epsilon: 15.0  # Epsilon parameter for Wing loss
   
   # Cosine similarity loss (tunable scaler)
   use_cosine_loss: true
@@ -76,7 +86,7 @@ optimizer:
   factor: 0.5
 
 training:
-  num_epochs: 100
+  num_epochs: 300
   gradient_clip: 1.0
   log_interval: 10
   val_interval: 1

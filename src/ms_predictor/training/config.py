@@ -27,6 +27,12 @@ class ModelConfig:
     max_charge: int = 10
     dropout: float = 0.1
     activation: str = 'gelu'
+    encoder_type: str = 'transformer'  # Options: 'transformer' or 'predfull'
+
+    # PredFull encoder params (used when encoder_type='predfull')
+    conv_kernel_sizes: list = field(default_factory=lambda: [2, 3, 4, 5, 6, 7, 8, 9])
+    num_se_blocks: int = 10
+    se_reduction: int = 16
 
 
 @dataclass
