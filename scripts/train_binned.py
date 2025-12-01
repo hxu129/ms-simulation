@@ -28,8 +28,10 @@ import sys
 sys.path.insert(0, '/root/ms/src')
 
 from ms_predictor.model.binned_predictor import BinnedMSPredictor, count_parameters
+from ms_predictor.model.predfull_binned_predictor import PredFullBinnedPredictor
 from ms_predictor.loss.binned_cosine_loss import BinnedCosineLoss
 from ms_predictor.data.parquet_dataset import create_parquet_dataloaders
+from ms_predictor.data.mgf_dataset import create_mgf_dataloaders
 from ms_predictor.data.tokenizer import AminoAcidTokenizer
 from ms_predictor.data.preprocessing import SpectrumPreprocessor
 from ms_predictor.data.data_prefetcher import DataPrefetcher
@@ -96,35 +98,68 @@ def create_dataloaders(cfg: DictConfig):
         )
     
     tokenizer = AminoAcidTokenizer()
-    preprocessor = SpectrumPreprocessor(
-        max_mz=cfg.data.max_mz,
-        top_k=cfg.data.top_k,
-        num_predictions=200  # Not used for binned model, but required by preprocessor
-    )
     
-    logger.info("Loading Parquet data")
-    logger.info(f"Data directory: {cfg.data.train_data_path}")
+    # Determine data format: MGF file or Parquet directory
+    use_mgf = cfg.data.get('use_mgf', False)
+    data_path = cfg.data.train_data_path
     
-    train_loader, val_loader, _ = create_parquet_dataloaders(
-        data_dir=cfg.data.train_data_path,
-        metadata_file=cfg.data.get('metadata_file', None),
-        batch_size=cfg.data.batch_size,
-        num_workers=cfg.data.num_workers,
-        tokenizer=tokenizer,
-        preprocessor=preprocessor,
-        max_length=cfg.model.max_length,
-        max_mz=cfg.data.max_mz,
-        top_k=cfg.data.top_k,
-        num_predictions=200,  # Not used for binned model
-        cache_dataframes=cfg.data.get('cache_dataframes', False),
-        max_files=cfg.data.get('max_files', None)
-    )
+    # Auto-detect format if not specified
+    if not use_mgf:
+        # Check if path is an MGF file
+        if os.path.isfile(data_path) and data_path.endswith('.mgf'):
+            use_mgf = True
+            logger.info("Auto-detected MGF file format")
+    
+    if use_mgf:
+        # Load MGF data
+        logger.info(f"Loading MGF data from: {data_path}")
+        
+        train_loader, val_loader, test_loader = create_mgf_dataloaders(
+            mgf_path=data_path,
+            tokenizer=tokenizer,
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
+            max_length=cfg.model.max_length,
+            max_mz=cfg.data.max_mz,
+            num_bins=cfg.model.num_bins,
+            normalize=True,
+            max_spectra=cfg.data.get('max_spectra', None),
+            train_split=0.8,
+            val_split=0.1,
+            test_split=0.1,
+            shuffle=True,
+            seed=cfg.seed
+        )
+    else:
+        # Load Parquet data
+        preprocessor = SpectrumPreprocessor(
+            max_mz=cfg.data.max_mz,
+            top_k=cfg.data.top_k,
+            num_predictions=200  # Not used for binned model, but required by preprocessor
+        )
+        
+        logger.info(f"Loading Parquet data from: {data_path}")
+        
+        train_loader, val_loader, _ = create_parquet_dataloaders(
+            data_dir=data_path,
+            metadata_file=cfg.data.get('metadata_file', None),
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
+            tokenizer=tokenizer,
+            preprocessor=preprocessor,
+            max_length=cfg.model.max_length,
+            max_mz=cfg.data.max_mz,
+            top_k=cfg.data.top_k,
+            num_predictions=200,  # Not used for binned model
+            cache_dataframes=cfg.data.get('cache_dataframes', False),
+            max_files=cfg.data.get('max_files', None)
+        )
     
     # Check if datasets are not empty
     if len(train_loader.dataset) == 0:
         raise ValueError(
-            f"No training data found in {cfg.data.train_data_path}\n"
-            "Make sure the directory contains .parquet files with MS/MS spectra data."
+            f"No training data found in {data_path}\n"
+            "Make sure the path contains valid data (Parquet files or MGF file)."
         )
     
     return train_loader, val_loader
@@ -148,12 +183,24 @@ def train_epoch(model, train_loader, criterion, optimizer, device, use_amp, scal
                 batch['charge']
             )
             
-            loss = criterion(
-                pred_binned,
-                batch['target_mz'],
-                batch['target_intensity'],
-                batch['target_mask']
-            )
+            # Check if using MGF format (has target_binned) or Parquet format (has target_mz/intensity/mask)
+            if 'target_binned' in batch:
+                # MGF format: direct binned spectrum
+                # Compute cosine similarity loss directly
+                target_binned = batch['target_binned']
+                # Normalize both predictions and targets
+                pred_norm = pred_binned / (pred_binned.norm(dim=1, keepdim=True) + 1e-8)
+                target_norm = target_binned / (target_binned.norm(dim=1, keepdim=True) + 1e-8)
+                # Cosine similarity loss: 1 - cosine_similarity
+                loss = 1 - (pred_norm * target_norm).sum(dim=1).mean()
+            else:
+                # Parquet format: use binned cosine loss with peak lists
+                loss = criterion(
+                    pred_binned,
+                    batch['target_mz'],
+                    batch['target_intensity'],
+                    batch['target_mask']
+                )
         
         # Backward pass
         optimizer.zero_grad()
@@ -198,12 +245,23 @@ def validate(model, val_loader, criterion, device, use_amp):
                 batch['charge']
             )
             
-            loss = criterion(
-                pred_binned,
-                batch['target_mz'],
-                batch['target_intensity'],
-                batch['target_mask']
-            )
+            # Check if using MGF format (has target_binned) or Parquet format (has target_mz/intensity/mask)
+            if 'target_binned' in batch:
+                # MGF format: direct binned spectrum
+                target_binned = batch['target_binned']
+                # Normalize both predictions and targets
+                pred_norm = pred_binned / (pred_binned.norm(dim=1, keepdim=True) + 1e-8)
+                target_norm = target_binned / (target_binned.norm(dim=1, keepdim=True) + 1e-8)
+                # Cosine similarity loss: 1 - cosine_similarity
+                loss = 1 - (pred_norm * target_norm).sum(dim=1).mean()
+            else:
+                # Parquet format: use binned cosine loss with peak lists
+                loss = criterion(
+                    pred_binned,
+                    batch['target_mz'],
+                    batch['target_intensity'],
+                    batch['target_mask']
+                )
         
         total_loss += loss.item()
     
@@ -325,18 +383,41 @@ def main(cfg: DictConfig):
     
     # Create model
     logger.info("\nCreating binned model...")
-    model = BinnedMSPredictor(
-        vocab_size=cfg.model.vocab_size,
-        hidden_dim=cfg.model.hidden_dim,
-        num_encoder_layers=cfg.model.num_encoder_layers,
-        num_heads=cfg.model.num_heads,
-        dim_feedforward=cfg.model.dim_feedforward,
-        num_bins=cfg.model.num_bins,
-        max_length=cfg.model.max_length,
-        max_charge=cfg.model.max_charge,
-        dropout=cfg.model.dropout,
-        activation=cfg.model.activation
-    )
+    model_type = cfg.model.get('model_type', 'transformer')
+    
+    if model_type == 'predfull':
+        logger.info("Using PredFull CNN encoder with original decoder")
+        model = PredFullBinnedPredictor(
+            vocab_size=cfg.model.vocab_size,
+            hidden_dim=cfg.model.hidden_dim,
+            conv_kernel_sizes=cfg.model.get('conv_kernel_sizes', [2, 3, 4, 5, 6, 7, 8, 9]),
+            num_se_blocks=cfg.model.get('num_se_blocks', 10),
+            num_residual_blocks=cfg.model.get('num_residual_blocks', 3),
+            se_reduction=cfg.model.get('se_reduction', 16),
+            num_bins=cfg.model.num_bins,
+            max_length=cfg.model.max_length,
+            max_charge=cfg.model.max_charge,
+            dropout=cfg.model.dropout,
+            activation=cfg.model.activation,
+            aggregation=cfg.model.get('aggregation', 'mean')
+        )
+    elif model_type == 'transformer':
+        logger.info("Using Transformer encoder")
+        model = BinnedMSPredictor(
+            vocab_size=cfg.model.vocab_size,
+            hidden_dim=cfg.model.hidden_dim,
+            num_encoder_layers=cfg.model.num_encoder_layers,
+            num_heads=cfg.model.num_heads,
+            dim_feedforward=cfg.model.dim_feedforward,
+            num_bins=cfg.model.num_bins,
+            max_length=cfg.model.max_length,
+            max_charge=cfg.model.max_charge,
+            dropout=cfg.model.dropout,
+            activation=cfg.model.activation
+        )
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}. Choose 'transformer' or 'predfull'.")
+    
     model.to(device)
     
     num_params = count_parameters(model)
