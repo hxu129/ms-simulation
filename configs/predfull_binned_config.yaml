@@ -1,0 +1,111 @@
+# Configuration for PredFull CNN-based binned MS spectrum predictor
+# Based on the SOTA architecture from:
+# Liu et al. 2020, Analytical Chemistry, "Full-Spectrum Prediction of Peptides 
+# Tandem Mass Spectra using Deep Neural Network"
+#
+# SOTA Performance (from paper):
+# - 2+ HCD spectra: 0.820 ± 0.088 cosine similarity (vs 0.837 replicate similarity)
+# - 3+ HCD spectra: 0.786 ± 0.085 cosine similarity (vs 0.806 replicate similarity)
+# 
+# Key architecture: 8 parallel CNNs (kernels 2-9) → 10 SE blocks → 3 residual blocks
+# Binning: 20,000 bins (0-2000 m/z range, 0.1 bin width)
+
+experiment_name: ms_predictor_predfull_binned
+seed: 42
+
+model:
+  model_type: predfull  # Use PredFull CNN encoder instead of transformer
+  vocab_size: 30  # 20 standard AAs + 4 modified AAs + 4 N-terminal mods + PAD + UNK
+  hidden_dim: 512
+  
+  # PredFull CNN encoder parameters (SOTA configuration from paper)
+  # Liu et al. 2020: "eight parallel 1-dimensional convolutional layers of different kernel sizes (from 2 to 9)"
+  conv_kernel_sizes: [2, 3, 4, 5, 6, 7, 8, 9]  # 8 parallel convolutions
+  # "10 consequential Squeeze-and-excitation blocks (we cannot observe further performance improvement with more blocks)"
+  num_se_blocks: 10  # 10 SE blocks (optimal from paper)
+  # "Three subsequently residual blocks... work as the decoder"
+  num_residual_blocks: 3  # 3 residual blocks in decoder
+  se_reduction: 16  # Reduction ratio for SE blocks (standard from SE-Net paper)
+  
+  # Spectrum binning parameters (SOTA configuration from paper)
+  # Paper: "bin width of 0.1, resulting in vector representations of 20,000 dimensions"
+  # m/z range: 0-2000, bin width: 0.1 → 20,000 bins
+  num_bins: 20000  # 20,000 bins (exact SOTA configuration)
+  max_length: 50  # Maximum peptide length
+  max_charge: 10
+  dropout: 0.1
+  activation: relu  # PredFull paper uses ReLU activation
+  aggregation: mean  # How to aggregate over sequence dimension ('mean', 'sum', 'max')
+
+data:
+  train_data_path: /root/autodl-tmp/massive.mgf  # Path to MGF file or Parquet directory
+  val_data_path: null    # Optional: Set to your validation data path
+  test_data_path: null   # Optional: Set to your test data path
+  batch_size: 32
+  num_workers: 4
+  max_mz: 2000.0  # Maximum m/z value (PredFull paper: 0-2000 range with bin width 0.1)
+  top_k: 20
+  use_mgf: true  # Use MGF format (auto-detected if path ends with .mgf)
+  use_parquet: false  # Use Parquet format
+  max_spectra: null  # Limit number of spectra from MGF (null for all)
+  cache_dataframes: false  # Cache entire Parquet files in memory (for Parquet only)
+  max_files: 1  # Limit number of Parquet files to load (for Parquet only)
+  metadata_file: null  # Optional path to metadata JSON file (for Parquet only)
+
+loss:
+  # Binned cosine loss parameters
+  cosine_loss_weight: 1.0
+  cosine_bin_size: 1.0  # Bin width of 0.1 m/z (PredFull SOTA configuration)
+  normalize_bins: true
+
+optimizer:
+  optimizer: adamw
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  eps: 1.0e-08
+  
+  # Learning rate scheduler
+  scheduler: cosine
+  warmup_epochs: 0
+  min_lr: 1.0e-04
+  
+  # For StepLR
+  step_size: 10
+  gamma: 0.1
+  
+  # For ReduceLROnPlateau
+  patience: 5
+  factor: 0.5
+
+training:
+  num_epochs: 800
+  gradient_clip: 1.0
+  log_interval: 10
+  val_interval: 1
+  save_interval: 5
+  
+  # Early stopping
+  early_stopping: false
+  early_stopping_patience: 10
+  
+  # Checkpointing
+  checkpoint_dir: /root/autodl-tmp/checkpoints
+  save_best_only: false
+  
+  # Device
+  device: cuda
+  mixed_precision: true
+
+inference:
+  max_mz: 2000.0  # Must match data.max_mz
+  batch_size: 64
+
+wandb:
+  enabled: true  # Enable/disable wandb logging
+  project: ms-predictor-predfull-binned  # Wandb project name
+  entity: null  # Wandb entity/username (optional)
+  mode: online  # online, offline, or disabled
+  log_interval: 10  # Log every N steps
+  dir: /root/autodl-tmp  # Directory for wandb logs
+
